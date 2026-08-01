@@ -1,0 +1,14 @@
+# Files and folders to exclude from Azure Functions deployment
+.git*
+.history
+.vscode
+__pycache__/
+*.pyc
+venv/
+node_modules/
+cron-service/
+attachments/
+test_files/
+.env
+.gitignore
+AZURE_DEPLOYMENT_GUIDE.md

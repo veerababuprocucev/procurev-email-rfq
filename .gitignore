@@ -1,0 +1,9 @@
+__pycache__/
+attachments/
+.env
+*.pyc
+config.py
+local.settings.json
+venv/
+.history/
+node_modules/

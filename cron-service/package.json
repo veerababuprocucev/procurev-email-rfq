@@ -1,0 +1,13 @@
+{
+  "name": "procurev-rfq-cron-service",
+  "version": "1.0.0",
+  "description": "Node.js Cron Job Scheduler for ProcureV RFQ Email Processing Python Project",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "once": "node index.js --once"
+  },
+  "dependencies": {
+    "node-cron": "^3.0.3"
+  }
+}

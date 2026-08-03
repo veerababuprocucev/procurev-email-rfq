@@ -144,6 +144,10 @@ Email:
             r'^(we\s+request\s+you\s+to\s+submit\s+your\s+quotation\s+for\s+the\s+supply\s+of|please\s+provide\s+quotation\s+for\s+)?(the\s+following\s+items?\.?\s*\(?|we\s+have\s+(a\s+)?requirement\s+(of|for)|requirement\s+(of|for)|(please\s+)?(provide|send)\s+(a\s+)?(quote|quotation|rate)\s+(for|of)|rfq\s+(for|of)|enquiry\s+(for|of)|(we\s+)?need|(we\s+)?require)\s*:?\s*\(?',
             '', desc, flags=re.IGNORECASE
         ).strip().rstrip(":")
+        if desc and len(desc) < 8:
+            exp_m = re.search(rf'\b{re.escape(desc)}\s+([A-Za-z0-9\s\-\/\(\)]+?)(?=[,\;\n\.]|\s*(?:required|needed|delivery|pincode|qty|brand|location)|$)', email_text, re.IGNORECASE)
+            if exp_m and len(exp_m.group(0).strip()) > len(desc):
+                desc = exp_m.group(0).strip()
         rfq_data["item_description"] = desc
 
     # Quantity validation
@@ -253,6 +257,12 @@ def fallback_extract_rfq(email_text):
 
     if item_description.lower().startswith("of "):
         item_description = item_description[3:].strip()
+
+    # Short-description expander (e.g. "Office" -> "Office Multifunction Laser Printers")
+    if item_description and len(item_description) < 8:
+        exp_match = re.search(rf'\b{re.escape(item_description)}\s+([A-Za-z0-9\s\-\/\(\)]+?)(?=[,\;\n\.]|\s*(?:required|needed|delivery|pincode|qty|brand|location)|$)', email_text, re.IGNORECASE)
+        if exp_match and len(exp_match.group(0).strip()) > len(item_description):
+            item_description = exp_match.group(0).strip()
 
     # 2. ACCURATE QUANTITY & UOM EXTRACTION (DIGITS + WORDS)
     explicit_qty = re.search(r'(?:quantity|qty|count)\s*[:=\-]?\s*(\d+)', email_text, re.IGNORECASE)

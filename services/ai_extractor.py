@@ -208,7 +208,7 @@ def fallback_extract_rfq(email_text):
     # 1. NATURAL ENGLISH PRODUCT NAME PATTERNS
     # Pattern A: "supply of Office Multifunction Laser Printers required for..."
     product_match = re.search(
-        r'(?:supply\s+of|procurement\s+of|purchase\s+of|quotation\s+for\s+(?:the\s+)?supply\s+of)\s+(.+?)\s+(?:required\s+for|needed\s+for|for\s+our|for\s+project|[,\;\n]|$)',
+        r'(?:supply\s+of|procurement\s+of|purchase\s+of|quotation\s+for\s+(?:the\s+)?supply\s+of)\s+([A-Za-z0-9\s\-\/\(\)]+?)\s+(?:required\s+for|needed\s+for|required\s+by|needed\s+by|for\s+our\s+organization|for\s+our\s+company|for\s+our\s+project|[,\;\n\.]|$)',
         email_text, re.IGNORECASE
     )
     if product_match:

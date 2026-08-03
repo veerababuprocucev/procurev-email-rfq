@@ -102,15 +102,15 @@ def process_emails():
         f"UOM              : {rfq_data.get('uom', '')}"
         )
         print(
-            f"Brand            : {rfq_data['brand']}"
+            f"Brand            : {rfq_data.get('brand', '')}"
         )
 
         print(
-            f"Delivery Date    : {rfq_data['delivery_date']}"
+            f"Delivery Date    : {rfq_data.get('delivery_date', '')}"
         )
 
         print(
-            f"Delivery Location: {rfq_data['delivery_location']}"
+            f"Delivery Location: {rfq_data.get('delivery_location', '')}"
         )
 
         print(
@@ -122,7 +122,7 @@ def process_emails():
         # -----------------------------
 
         item_description = (
-            rfq_data["item_description"]
+            rfq_data.get("item_description", "")
             .strip()
         )
 
@@ -142,13 +142,9 @@ def process_emails():
 
             continue
 
-        if rfq_data["quantity"] <= 0:
+        if not rfq_data.get("quantity") or rfq_data["quantity"] <= 0:
 
-            print(
-                "Invalid RFQ - Quantity Missing"
-            )
-
-            continue
+            rfq_data["quantity"] = 1
 
         # -----------------------------
         # Delivery Date Handling

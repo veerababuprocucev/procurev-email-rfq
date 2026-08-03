@@ -120,11 +120,11 @@ Email:
     required_keys = [
         "item_description", "specifications", "quantity",
         "uom", "brand", "delivery_date", "delivery_city",
-        "delivery_state", "delivery_pincode"
+        "delivery_state", "delivery_pincode", "delivery_location"
     ]
     for key in required_keys:
         if key not in rfq_data:
-            rfq_data[key] = 0 if key == "quantity" else ""
+            rfq_data[key] = 1 if key == "quantity" else ""
 
     # Clean filler lead phrases from AI extracted item_description
     if isinstance(rfq_data.get("item_description"), str):
@@ -146,6 +146,8 @@ Email:
         explicit_qty = re.search(r'(?:quantity|qty|count)\s*[:=\-]?\s*(\d+)', email_text, re.IGNORECASE)
         if explicit_qty:
             rfq_data["quantity"] = int(explicit_qty.group(1))
+        else:
+            rfq_data["quantity"] = 1
 
     # Brand validation
     if isinstance(rfq_data.get("brand"), list):

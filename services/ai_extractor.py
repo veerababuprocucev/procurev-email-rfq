@@ -208,7 +208,7 @@ def fallback_extract_rfq(email_text):
     # 1. NATURAL ENGLISH PRODUCT NAME PATTERNS
     # Pattern A: "supply of Office Multifunction Laser Printers required for..."
     product_match = re.search(
-        r'(?:supply\s+of|procurement\s+of|purchase\s+of|quotation\s+for\s+(?:the\s+)?supply\s+of)\s+(.+?)\s+(?:required\s+for|needed\s+for|for\s+our|for\s+project)',
+        r'(?:supply\s+of|procurement\s+of|purchase\s+of|quotation\s+for\s+(?:the\s+)?supply\s+of)\s+(.+?)\s+(?:required\s+for|needed\s+for|for\s+our|for\s+project|[,\;\n]|$)',
         email_text, re.IGNORECASE
     )
     if product_match:
@@ -222,13 +222,16 @@ def fallback_extract_rfq(email_text):
             if len(extracted_name) > 2 and not extracted_name.lower().startswith("the following"):
                 item_description = extracted_name
 
-    # Pattern C: "Need 50 Dell Laptops" or "Looking for 200 Units of Havells Wires"
+    # Pattern C: "Need 50 Dell Laptops" or "Looking for 200 Units of Havells 2.5 sqmm Wires"
     if not item_description:
-        need_match = re.search(r'(?:need|required?|looking\s+for|require)\s+(?:\d+\s+)?(?:nos|pcs|units|items)?\s*(?:of\s+)?([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[,\;\n\.]|\s*(?:delivery|pincode|qty|brand|location)|$)', email_text, re.IGNORECASE)
+        need_match = re.search(r'(?:need|required?|looking\s+for|require)\s+(?:\d+\s+)?(?:nos|pcs|units|items)?\s*(?:of\s+)?([A-Za-z0-9\s\-\/\(\)]+(?:\.\d+)?(?:\s+[A-Za-z0-9\s\-\/\(\)]+)*)(?=\s+(?:for|delivery|pincode|qty|brand|location|[,\;\n\.]|$))', email_text, re.IGNORECASE)
         if need_match and need_match.group(1):
             cleaned_need = need_match.group(1).strip()
             if cleaned_need and len(cleaned_need) > 2:
                 item_description = cleaned_need
+
+    if item_description:
+        item_description = re.sub(r'\s+for\s+(?:bangalore|mumbai|delhi|chennai|hyderabad|kolkata|pune|ahmedabad|project|our|site|location)$', '', item_description, flags=re.IGNORECASE).strip()
 
     # Pattern D: Lead phrase cleanup for general text
     if not item_description or item_description.lower().startswith("kindly") or item_description.lower().startswith("please"):

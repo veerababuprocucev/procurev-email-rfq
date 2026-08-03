@@ -1,10 +1,20 @@
+"""
+Enterprise RFQ Extraction Engine - Production Grade Pipeline
+Architecture: Few-Shot LLM (Ollama) -> Validation -> Priority Regex -> Domain Dictionary -> ISO Normalization
+Author: Senior AI Engineer
+"""
+
 import requests
 import json
 import re
 from datetime import datetime
+from typing import Dict, Any, List, Optional
 
-# Database of common industrial/IT/procurement brands for high-precision recognition
-COMMON_BRANDS = [
+# ---------------------------------------------------------------------------
+# Domain Product Dictionaries & Brand Registries for High-Precision Matching
+# ---------------------------------------------------------------------------
+
+COMMON_BRANDS: List[str] = [
     "Dell", "HP", "Lenovo", "Acer", "Apple", "Asus", "Samsung", "LG",
     "Asian Paints", "Berger", "Dulux", "Nerolac", "Havells", "Schneider",
     "Legrand", "Finolex", "Supreme", "Ashirvad", "Astral", "Polycab",
@@ -12,34 +22,44 @@ COMMON_BRANDS = [
     "Anchor", "L&T", "Honeywell", "3M", "Kirloskar", "ABB"
 ]
 
-NUMBER_WORDS = {
+NUMBER_WORDS: Dict[str, int] = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
     "eleven": 11, "twelve": 12, "fifteen": 15, "twenty": 20,
     "fifty": 50, "hundred": 100
 }
 
-PRODUCT_PATTERNS = [
-    # 1. Subject / Header lines (cleanest product name)
+# Domain Category Product Dictionary for Industrial & Enterprise Procurement
+INDUSTRIAL_PRODUCT_DICTIONARY: List[str] = [
+    "Multifunction Laser Printers", "Laser Printers", "Desktop Computers",
+    "Latitude Laptops", "Laptops", "CPVC Pipes", "PVC Pipes", "GI Pipes",
+    "HDPE Pipes", "SS 304 Pipes", "Copper Cables", "Armoured Cables",
+    "Acrylic Emulsion Paint", "Exterior Emulsion Paint", "MCCB Circuit Breaker",
+    "Automatic Voltage Stabilizer", "Air Compressor", "Hammer Drill Machine",
+    "Solvent Cement", "Centrifugal Water Pump"
+]
+
+PRODUCT_PATTERNS: List[str] = [
+    # Priority 1: Email Subject / Header line (cleanest product description)
     r'\b(?:subject|re|rfq|enquiry|tender|quotation)\s*[:=\-]\s*([A-Za-z0-9\s\-\/\(\)]+?)(?=[;\n\.]|\s*(?:quantity|qty|brand|delivery)|$)',
 
-    # 2. Tagged Item/Product fields
+    # Priority 2: Explicit Tagged Fields (Item Name / Product Name)
     r'\b(?:item\s*name|product\s*name|item|product)\s*[:=\-]?\s*([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[;\n\.]|\s*(?:quantity|qty|brand|uom)|$)',
 
-    # 3. Supply of / Procurement of / Purchase of
+    # Priority 3: Supply of / Procurement of / Purchase of
     r'\b(?:supply\s+of|procurement\s+of|purchase\s+of)\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
 
-    # 4. Quotation for / Please quote for
+    # Priority 4: Quotation for / Please quote for
     r'\b(?:quotation\s+for|quote\s+for|please\s+quote\s+for)\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
 
-    # 5. Requirement of/for
+    # Priority 5: Requirement of/for
     r'\b(?:requirement\s+(?:of|for))\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
 
-    # 6. Looking for / Need / Require
+    # Priority 6: Looking for / Need / Require
     r'\b(?:looking\s+for|need|require)\s+(?:\d+\s+)?(?:nos|pcs|units|items)?\s*(?:of\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:for|delivery|pincode|qty|brand|location)|[;\n\.]|$)'
 ]
 
-SPEC_PATTERNS = [
+SPEC_PATTERNS: List[str] = [
     r'A[345]\s+Size[^\.\,\n]*',
     r'Print[,\s]+Scan[,\s]+Copy[^\.\,\n]*',
     r'Automatic\s+Duplex\s+Printing[^\.\,\n]*',
@@ -54,34 +74,50 @@ SPEC_PATTERNS = [
     r'Wi-Fi|Bluetooth|HDMI|Gigabit'
 ]
 
-UOM_REGEX = r'\b(nos|pcs|kg|boxes?|packs?|each|ea|lot|lumpsum|sets?|pair|coil|roll|bundle|sheet|tons?|mt|kl|ltr|litres?|sqft|sqm|cum|mtr|meters?)\b'
+UOM_REGEX: str = r'\b(nos|pcs|kg|boxes?|packs?|bags?|each|ea|lot|lumpsum|sets?|pair|coil|roll|bundle|sheet|tons?|mt|kl|ltr|litres?|sqft|sqm|cum|mtr|meters?)\b'
 
 
-def is_generic_description(desc_str):
+# ---------------------------------------------------------------------------
+# Helper Functions: Validation, Normalization, Clean-up
+# ---------------------------------------------------------------------------
+
+def is_generic_description(desc_str: Optional[str]) -> bool:
     """
-    Checks if an item description is a generic filler word, prompt artifact, or table header row.
+    Validates if an item description is a generic filler word, prompt artifact, or table header row.
+    Returns True if invalid/generic, False if valid product description.
     """
     if not desc_str or not str(desc_str).strip():
         return True
+
     clean = re.sub(r'\s+', ' ', str(desc_str).strip().lower())
-    generic_keywords = [
+
+    # Exact match against single generic words, prompt artifacts, or table headers
+    generic_exact = [
         "procurement request", "procurement", "request", "rfq", "enquiry", "quotation", "quote",
         "description specification / make", "description specification make", "description specification",
         "item description", "product description", "specification / make", "specification make",
         "description / specification", "item name", "product name", "item", "product", "particulars",
-        "sl no", "s.no", "description", "specification", "make"
+        "sl no", "s.no", "description", "specification", "make", "material", "general item",
+        "office", "printer", "laptop", "pipe", "cable", "paint"
     ]
-    if clean in generic_keywords:
+    if clean in generic_exact:
         return True
-    for g in generic_keywords:
+
+    # Prefix/suffix match ONLY for explicit multi-word table headers & filler phrases
+    generic_phrases = [
+        "procurement request", "item description", "product description",
+        "description specification", "specification make", "description / specification"
+    ]
+    for g in generic_phrases:
         if clean == g or clean.startswith(g + " ") or clean.endswith(" " + g):
             return True
+
     return False
 
 
-def normalize_date(date_str):
+def normalize_date(date_str: Optional[str]) -> str:
     """
-    Formats dates into ISO YYYY-MM-DD format (e.g. 2026-08-10) required by backend API.
+    Normalizes any human date format into ISO YYYY-MM-DD format (e.g. 2026-08-10) required by backend API.
     """
     if not date_str or not str(date_str).strip():
         return ""
@@ -121,17 +157,21 @@ def normalize_date(date_str):
     return raw
 
 
-def validate_and_normalize_rfq(rfq_data, email_text):
+# ---------------------------------------------------------------------------
+# Core Production Validation & Normalization Pipeline
+# ---------------------------------------------------------------------------
+
+def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dict[str, Any]:
     """
-    Production validation pipeline: AI -> Validation -> Regex Correction -> Normalization -> Output
+    Production validation pipeline: AI -> Validation -> Priority Regex -> Domain Dictionary -> Normalization -> Output
     """
     if not isinstance(rfq_data, dict):
         rfq_data = {}
 
-    # 1. ITEM DESCRIPTION VALIDATION (Word Count & Length Validation)
+    # 1. ITEM DESCRIPTION VALIDATION
     desc = str(rfq_data.get("item_description") or "").strip()
 
-    # Clean lead filler phrases
+    # Clean leading filler phrases
     desc = re.sub(
         r'^(we\s+request\s+you\s+to\s+submit\s+your\s+quotation\s+for\s+the\s+supply\s+of|please\s+provide\s+quotation\s+for\s+)?(the\s+following\s+items?\.?\s*\(?|we\s+have\s+(a\s+)?requirement\s+(of|for)|requirement\s+(of|for)|(please\s+)?(provide|send)\s+(a\s+)?(quote|quotation|rate)\s+(for|of)|rfq\s+(for|of)|enquiry\s+(for|of)|(we\s+)?need|(we\s+)?require)\s*:?\s*\(?',
         '', desc, flags=re.IGNORECASE
@@ -146,7 +186,7 @@ def validate_and_normalize_rfq(rfq_data, email_text):
     # Strip quantity suffixes like "- Ten Pcs", "- 100 Mtr", "- Twenty Boxes"
     desc = re.sub(r'[\-\:]?\s*(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred|\d+)\s*(?:nos|pcs|units?|items?|laptops?|sets?|mtr|meters?|kg|litres?|boxes?|packs?)\b.*$', '', desc, flags=re.IGNORECASE).strip()
 
-    # If desc is missing, generic (e.g. "Description Specification / Make", "Procurement Request"), < 2 words, or < 10 chars, recover via PRODUCT_PATTERNS
+    # Recovery Tier 1: Priority Regular Expressions
     if is_generic_description(desc) or len(desc.split()) < 2 or len(desc) < 10:
         for p in PRODUCT_PATTERNS:
             m = re.search(p, email_text, re.IGNORECASE)
@@ -157,15 +197,22 @@ def validate_and_normalize_rfq(rfq_data, email_text):
                     desc = extracted
                     break
 
-    # Safe fallback check before defaulting
+    # Recovery Tier 2: Safe Fallback Regex
     if is_generic_description(desc):
         m_fall = re.search(r'supply\s+of\s+(.+?)(?=\s+required|\s+needed|[,\;\n\.]|$)', email_text, re.IGNORECASE)
         if m_fall and not is_generic_description(m_fall.group(1).strip()):
             desc = m_fall.group(1).strip()
 
+    # Recovery Tier 3: Industrial Domain Product Dictionary Match
+    if is_generic_description(desc):
+        for dict_item in INDUSTRIAL_PRODUCT_DICTIONARY:
+            if re.search(rf"\b{re.escape(dict_item)}\b", email_text, re.IGNORECASE):
+                desc = dict_item
+                break
+
     rfq_data["item_description"] = desc if not is_generic_description(desc) else "Procurement Request"
 
-    # 2. QUANTITY VALIDATION (Digits + Word Numbers + "Qty : Five" Support)
+    # 2. QUANTITY VALIDATION (Digits + Word Numbers + "Qty : Five" Support + Model Protection)
     qty_word = re.search(r'(?:qty|quantity|count)\s*[:=\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b', email_text, re.IGNORECASE)
     word_qty = re.search(r'\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b(?:\s*(nos|pcs|units?|items?|laptops?|sets?|mtr|meters?|kg|litres?|boxes?|packs?))?', email_text, re.IGNORECASE)
     explicit_qty = re.search(r'(?:quantity|qty|count)\s*[:=\-]?\s*(\d+)', email_text, re.IGNORECASE)
@@ -195,7 +242,7 @@ def validate_and_normalize_rfq(rfq_data, email_text):
 
     rfq_data["quantity"] = quantity
 
-    # 3. UOM VALIDATION (Extended Vocabulary)
+    # 3. UOM VALIDATION (25 Procurement Units)
     if not rfq_data.get("uom") or rfq_data["uom"].lower() in ["", "none", "null"]:
         uom_m = re.search(UOM_REGEX, email_text, re.IGNORECASE)
         if uom_m:
@@ -203,7 +250,7 @@ def validate_and_normalize_rfq(rfq_data, email_text):
         else:
             rfq_data["uom"] = "Nos"
 
-    # 4. BRAND VALIDATION ("Any", "No Specific", "Open", "Equivalent" brand support)
+    # 4. BRAND VALIDATION ("Any", "No Specific", "Open", "Equivalent" Brand Recognition)
     brand = str(rfq_data.get("brand") or "").strip()
     if re.search(r'\b(any|equivalent|open|no\s+specific)\s+(brand|make)\b', email_text, re.IGNORECASE):
         brand = "Any"
@@ -214,7 +261,7 @@ def validate_and_normalize_rfq(rfq_data, email_text):
                 break
     rfq_data["brand"] = brand or "Not Specified"
 
-    # 5. FULL PHRASE SPECIFICATIONS EXTRACTION
+    # 5. FULL PHRASE SPECIFICATIONS EXTRACTION (Includes PPM Range & Model Codes)
     specs_list = []
     for sp in SPEC_PATTERNS:
         m = re.search(sp, email_text, re.IGNORECASE)
@@ -226,7 +273,7 @@ def validate_and_normalize_rfq(rfq_data, email_text):
     elif not rfq_data.get("specifications"):
         rfq_data["specifications"] = f"{rfq_data['item_description']}" + (f", Brand: {brand}" if brand else "")
 
-    # 6. DELIVERY DATE NORMALIZATION (DD-Mon-YYYY format)
+    # 6. DELIVERY DATE NORMALIZATION (ISO YYYY-MM-DD)
     delivery_date = str(rfq_data.get("delivery_date") or "").strip()
     if not delivery_date:
         date_match = re.search(r'\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}|\d{4}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})\b', email_text, re.IGNORECASE)
@@ -253,7 +300,15 @@ def validate_and_normalize_rfq(rfq_data, email_text):
     return rfq_data
 
 
-def extract_rfq(email_text):
+# ---------------------------------------------------------------------------
+# Ollama Few-Shot LLM Extraction Core
+# ---------------------------------------------------------------------------
+
+def extract_rfq(email_text: str) -> Dict[str, Any]:
+    """
+    Main RFQ Extraction Entrypoint.
+    Executes Few-Shot Ollama Llama3 JSON Extraction -> Validation -> Normalization.
+    """
     if not isinstance(email_text, str):
         email_text = str(email_text or "")
 
@@ -261,37 +316,66 @@ def extract_rfq(email_text):
     if len(email_text) > 25000:
         email_text = email_text[:25000]
 
-    prompt = f"""You are an expert Procurement RFQ Extraction AI.
+    prompt = f"""You are a Senior Procurement AI System extracting RFQ data into valid JSON.
 
-Read the email carefully.
-Return ONLY JSON.
-Never explain anything.
-Never summarize.
-Extract exactly what appears in the email.
+CRITICAL RULES:
+1. item_description MUST be the COMPLETE PRODUCT NAME.
+   NEVER return generic single words like "Office", "Printer", "Laptop", "Cable", "Pipe", "Paint", "Description", "Item", "Product", "Procurement Request".
+2. quantity MUST be an integer representing item count only. Convert words ("Five" -> 5).
+3. brand: If document specifies "any brand", "open brand", "equivalent make", return "Any".
+4. delivery_date: Output ISO date format YYYY-MM-DD.
 
-Rules:
-1. Item Description must ONLY contain the actual product/material name.
-Never return single words like "Office", "Printer", "Laptop", "Cable", "Pipe", "Paint" alone.
-Always return the complete product name exactly as written.
-GOOD:
-- Office Multifunction Laser Printers
-- Dell Latitude 5450 Laptop
-- Asian Paints Acrylic Emulsion
-- CPVC Pipe PN16
+EXAMPLES:
 
-BAD:
-- Office
-- Printer
-- Laptop
-- Pipe
-- Paint
+Example 1:
+Input: "We request quotation for supply of Office Multifunction Laser Printers required for our team. Five Nos. Any brand. Delivery Date: 10 August 2026. Location: Bangalore 560001."
+Output:
+{{
+  "item_description": "Office Multifunction Laser Printers",
+  "specifications": "Print, Scan, Copy, Duplex",
+  "quantity": 5,
+  "uom": "Nos",
+  "brand": "Any",
+  "delivery_date": "2026-08-10",
+  "delivery_city": "Bangalore",
+  "delivery_state": "",
+  "delivery_pincode": "560001"
+}}
 
-2. Quantity must ONLY be the requested item quantity as an integer. Convert word numbers ("Five" -> 5).
-3. Brand: Extract manufacturer (e.g. Dell, HP, Asian Paints). If email says "any brand", "no specific brand", "open brand", "equivalent brand", return "Any".
-4. UOM: Unit of measurement (e.g. Nos, Pcs, Kg, Mtr, Set, Box, Each, EA, Lot, Lumpsum, Pair, Roll, Sheet, Ton, MT, KL, Ltr, Sqft, Sqm, Cum).
-5. Specifications: List key features, specs, model numbers, or requirements.
+Example 2:
+Input: "Requirement for Dell Latitude 5450 Laptop - Ten Pcs. Specs: 16GB RAM, 512GB SSD. Delivery: 15-08-2026."
+Output:
+{{
+  "item_description": "Dell Latitude 5450 Laptop",
+  "specifications": "16GB RAM, 512GB SSD",
+  "quantity": 10,
+  "uom": "Pcs",
+  "brand": "Dell",
+  "delivery_date": "2026-08-15",
+  "delivery_city": "",
+  "delivery_state": "",
+  "delivery_pincode": ""
+}}
 
-Return ONLY this JSON structure:
+Example 3:
+Input: "Please quote for CPVC Pipe PN16 1 inch - 100 Mtr. Brand: Supreme. Delivery Date: 2026-08-25."
+Output:
+{{
+  "item_description": "CPVC Pipe PN16 1 inch",
+  "specifications": "CPVC, PN16, 1 inch",
+  "quantity": 100,
+  "uom": "Mtr",
+  "brand": "Supreme",
+  "delivery_date": "2026-08-25",
+  "delivery_city": "",
+  "delivery_state": "",
+  "delivery_pincode": ""
+}}
+
+NOW EXTRACT FROM THIS RFQ TEXT:
+{email_text}
+
+Return ONLY VALID JSON following this exact structure:
 {{
   "item_description": "",
   "specifications": "",
@@ -303,9 +387,6 @@ Return ONLY this JSON structure:
   "delivery_state": "",
   "delivery_pincode": ""
 }}
-
-Email:
-{email_text}
 """
 
     rfq_data = {}
@@ -348,7 +429,7 @@ Email:
     return validate_and_normalize_rfq(rfq_data, email_text)
 
 
-def fallback_extract_rfq(email_text):
+def fallback_extract_rfq(email_text: str) -> Dict[str, Any]:
     """
     Ultra-high precision rule-based fallback extractor when Ollama is offline.
     """
@@ -375,11 +456,16 @@ def fallback_extract_rfq(email_text):
     return rfq_data
 
 
-# TEST ONLY
+# ---------------------------------------------------------------------------
+# Module Test Suite
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     sample = """
-    We request you to submit your quotation for the supply of Office Multifunction Laser Printers required for our organization. Qty : Five Nos. Any brand. Delivery Date: 10th August 2026. Delivery Location: Bangalore 560001. Specs: A4 Size, Print, Scan, Copy, Network Connectivity, Automatic Duplex Printing, 30-40 PPM, Warranty Details, Cartridge Yield, Installation Support.
+    We request you to submit your quotation for the supply of Office Multifunction Laser Printers required for our organization. Qty : Five Nos. Any brand. Delivery Date: 10th August 2026. Delivery Location: Bangalore, Karnataka, 560001. Specs: A4 Size, Print, Scan, Copy, Network Connectivity, Automatic Duplex Printing, 30-40 PPM, Warranty Details, Cartridge Yield, Installation Support.
     """
 
     rfq_data = extract_rfq(sample)
-    print(rfq_data)
+    print("\n========== AI EXTRACTED RFQ ==========")
+    for k, v in rfq_data.items():
+        print(f"{k:<18}: {v}")
+    print("======================================\n")

@@ -2,16 +2,59 @@ import requests
 import json
 import re
 
+# Database of common industrial/IT/procurement brands for high-precision recognition
+COMMON_BRANDS = [
+    "Dell", "HP", "Lenovo", "Acer", "Apple", "Asus", "Samsung", "LG",
+    "Asian Paints", "Berger", "Dulux", "Nerolac", "Havells", "Schneider",
+    "Legrand", "Finolex", "Supreme", "Ashirvad", "Astral", "Polycab",
+    "Tata", "JSW", "Bosch", "Siemens", "Philips", "Godrej", "Crompton",
+    "Anchor", "L&T", "Honeywell", "3M", "Kirloskar", "ABB"
+]
+
 
 def extract_rfq(email_text):
+    if not isinstance(email_text, str):
+        email_text = str(email_text or "")
 
-    # Truncate very long email text to prevent CPU prompt evaluation delays
-    if isinstance(email_text, str) and len(email_text) > 3000:
-        email_text = email_text[:3000]
+    # Issue 1: Allow up to 25,000 characters so long PDF/DOCX text is not truncated
+    if len(email_text) > 25000:
+        email_text = email_text[:25000]
 
-    prompt = f"""You are an AI procurement assistant. Analyze the email and extract RFQ information.
+    # Issue 2: High-precision prompt with explicit GOOD vs BAD examples
+    prompt = f"""You are an expert Procurement RFQ Extraction AI.
 
-Return ONLY valid JSON matching this schema:
+Read the email carefully.
+Return ONLY JSON.
+Never explain anything.
+Never summarize.
+Extract exactly what appears in the email.
+
+Rules:
+1. Item Description must ONLY contain the actual product/material name.
+GOOD:
+- Dell Latitude 5450 Laptop
+- CPVC Pipes
+- Acrylic Paint
+
+BAD:
+- We have requirement of...
+- Please quote for...
+- The following item...
+- Requirement for...
+
+2. Quantity must ONLY be the requested item quantity.
+If email says "Dell Latitude 5450 Laptop, Quantity: 25 Nos", return 25.
+Never return model numbers like 5450 as quantity!
+
+3. Brand: Extract only the manufacturer (e.g. Dell, HP, Asian Paints, Finolex).
+
+4. UOM: Unit of measurement (e.g. Nos, Pcs, Kg, Mtr, Set, Box).
+
+5. Specifications: Include model numbers, specs (processor, RAM, size, thickness, etc.).
+
+6. Ignore greetings, signatures, footers, and email disclaimers.
+
+Return ONLY this JSON structure:
 {{
   "item_description": "",
   "specifications": "",
@@ -24,18 +67,7 @@ Return ONLY valid JSON matching this schema:
   "delivery_pincode": ""
 }}
 
-Extraction Rules:
-- item_description: The specific product, material, or service requested (e.g., "PLUMBING Materials - CPVC Pipes & Valves", "Dell Laptops").
-  CRITICAL: Do NOT include filler lead phrases like "We have requirement of", "RFQ for", "Please quote for", "Requirement for". Extract the complete actual product/material names and list item details.
-- quantity: total item quantity as a number (default 1 if unspecified or multiple line items).
-- uom: Unit of Measurement (e.g., "Nos", "Kg", "Mtr", "Set", "Pcs"). Use "Nos" for countable items if unspecified.
-- brand: manufacturer/brand string (comma-separated if multiple).
-- delivery_date: format as YYYY-MM-DD (empty string if not specified).
-- delivery_city, delivery_state, delivery_pincode: extract separately. A 6-digit number is delivery_pincode.
-- specifications: detailed specifications, sizes, model numbers, or line item details.
-- Ignore greetings, signatures, disclaimers, and non-procurement text.
-
-Email Content:
+Email:
 {email_text}
 """
 
@@ -49,7 +81,7 @@ Email Content:
                 "format": "json",
                 "keep_alive": "1h",
                 "options": {
-                    "num_predict": 250,
+                    "num_predict": 300,
                     "temperature": 0.0
                 }
             },
@@ -71,78 +103,68 @@ Email Content:
 
     result = response_json["response"]
 
-    # Extract JSON from AI response
-    json_match = re.search(
-        r'\{[\s\S]*?\}',
-        result
-    )
+    # Issue 3: Clean JSON loading without flaky regex
+    try:
+        rfq_data = json.loads(result.strip())
+    except Exception:
+        json_match = re.search(r'\{[\s\S]*\}', result)
+        if json_match:
+            try:
+                rfq_data = json.loads(json_match.group())
+            except Exception:
+                raise Exception("Invalid JSON returned by Ollama")
+        else:
+            raise Exception("Invalid JSON returned by Ollama")
 
-    if not json_match:
-        raise Exception("No JSON found in AI response")
-
-    rfq_data = json.loads(
-        json_match.group()
-    )
-
-    # Ensure all keys exist
+    # Ensure required fields exist
     required_keys = [
-    "item_description",
-    "specifications",
-    "quantity",
-    "uom",
-    "brand",
-    "delivery_date",
-    "delivery_location"
+        "item_description", "specifications", "quantity",
+        "uom", "brand", "delivery_date", "delivery_city",
+        "delivery_state", "delivery_pincode"
     ]
-
     for key in required_keys:
-
         if key not in rfq_data:
-
-            if key == "quantity":
-                rfq_data[key] = 0
-            else:
-                rfq_data[key] = ""
+            rfq_data[key] = 0 if key == "quantity" else ""
 
     # Clean filler lead phrases from AI extracted item_description
     if isinstance(rfq_data.get("item_description"), str):
         desc = rfq_data["item_description"].strip()
-        desc = re.sub(r'^(we\s+have\s+(a\s+)?requirement\s+(of|for)|requirement\s+(of|for)|(please\s+)?(provide|send)\s+(a\s+)?(quote|quotation|rate)\s+(for|of)|rfq\s+(for|of)|enquiry\s+(for|of)|(we\s+)?need|(we\s+)?require)\s*:\s*', '', desc, flags=re.IGNORECASE).strip()
+        desc = re.sub(
+            r'^(please\s+provide\s+quotation\s+for\s+)?(the\s+following\s+items?\.?\s*\(?|we\s+have\s+(a\s+)?requirement\s+(of|for)|requirement\s+(of|for)|(please\s+)?(provide|send)\s+(a\s+)?(quote|quotation|rate)\s+(for|of)|rfq\s+(for|of)|enquiry\s+(for|of)|(we\s+)?need|(we\s+)?require)\s*:?\s*\(?',
+            '', desc, flags=re.IGNORECASE
+        ).strip().rstrip(":")
         rfq_data["item_description"] = desc
 
-    # Quantity validation
+    # Quantity validation (prevent model number overflow)
     try:
-        rfq_data["quantity"] = int(
-            rfq_data["quantity"]
-        )
-    except:
+        rfq_data["quantity"] = int(rfq_data["quantity"])
+    except Exception:
         rfq_data["quantity"] = 0
 
-    # UOM Validation
+    if rfq_data["quantity"] <= 0:
+        # Fallback to scanning for explicit quantity in text
+        explicit_qty = re.search(r'(?:quantity|qty|count)\s*[:=\-]?\s*(\d+)', email_text, re.IGNORECASE)
+        if explicit_qty:
+            rfq_data["quantity"] = int(explicit_qty.group(1))
 
-    if "uom" not in rfq_data:
-        rfq_data["uom"] = ""
+    # Brand validation
+    if isinstance(rfq_data.get("brand"), list):
+        rfq_data["brand"] = ", ".join(rfq_data["brand"])
+    rfq_data["brand"] = str(rfq_data.get("brand") or "").strip()
 
-    rfq_data["uom"] = str(
-        rfq_data["uom"]
-    ).strip()
-
-    # Brand should always be string
-    if isinstance(
-        rfq_data["brand"],
-        list
-    ):
-        rfq_data["brand"] = ", ".join(
-            rfq_data["brand"]
-        )
+    # Brand fallback detection if brand missing
+    if not rfq_data["brand"]:
+        for b in COMMON_BRANDS:
+            if re.search(rf"\b{re.escape(b)}\b", email_text, re.IGNORECASE):
+                rfq_data["brand"] = b
+                break
 
     return rfq_data
 
 
 def fallback_extract_rfq(email_text):
     """
-    Fallback extractor when Ollama AI server is offline or unavailable.
-    Uses targeted regex patterns to extract quantity, brand, item description, and specs accurately.
+    Ultra-high precision rule-based fallback extractor when Ollama is offline.
     """
     if not email_text:
         email_text = ""
@@ -159,8 +181,7 @@ def fallback_extract_rfq(email_text):
     delivery_pincode = ""
     specifications = ""
 
-    # 1. ACCURATE QUANTITY EXTRACTION
-    # First check explicit "Quantity: 25" or "Qty: 25"
+    # Issue 6: Comprehensive Quantity Extraction
     explicit_qty = re.search(r'(?:quantity|qty|count)\s*[:=\-]?\s*(\d+)', email_text, re.IGNORECASE)
     if explicit_qty:
         try:
@@ -168,8 +189,7 @@ def fallback_extract_rfq(email_text):
         except Exception:
             quantity = 1
     else:
-        # Check number followed by unit keyword e.g. "25 Nos", "25 Pcs", "25 Laptops"
-        unit_qty = re.search(r'\b(\d{1,3})\s*(nos|pcs|units|items|laptops|sets|mtr|kg|litres|qty)\b', email_text, re.IGNORECASE)
+        unit_qty = re.search(r'\b(\d{1,4})\s*(nos|pcs|units?|items?|laptops?|sets?|mtr|meters?|kg|litres?|qty|boxes?|packs?)\b', email_text, re.IGNORECASE)
         if unit_qty:
             try:
                 quantity = int(unit_qty.group(1))
@@ -180,18 +200,29 @@ def fallback_extract_rfq(email_text):
         else:
             quantity = 1
 
-    # 2. BRAND EXTRACTION
+    # Issue 5: High Accuracy Brand Detection
     brand_match = re.search(r'(?:brand|make|manufacturer)\s*[:=\-]?\s*([A-Za-z0-9\s]+(?:\([A-Za-z0-9\s]+\))?)', email_text, re.IGNORECASE)
     if brand_match:
         brand = brand_match.group(1).strip()
 
-    # 3. ACCURATE ITEM NAME EXTRACTION
-    # Check for explicit "Item Name: Dell Latitude 5450 Laptop"
+    if not brand:
+        for b in COMMON_BRANDS:
+            if re.search(rf"\b{re.escape(b)}\b", email_text, re.IGNORECASE):
+                brand = b
+                break
+
+    # Issue 4: Advanced Item Name Patterns ("Item Name:", "Need 25...", "Required 50...")
     item_name_match = re.search(r'(?:item\s*name|product\s*name|item|product)\s*[:=\-]?\s*([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[,\;\n]|\s*(?:quantity|qty|brand|uom)|$)', email_text, re.IGNORECASE)
     if item_name_match:
         extracted_name = item_name_match.group(1).strip()
         if len(extracted_name) > 2 and not extracted_name.lower().startswith("the following"):
             item_description = extracted_name
+
+    # "Need 25 Dell Laptops" or "Required 50 CPVC Pipes"
+    if not item_description:
+        need_match = re.search(r'(?:need|required?|looking\s+for|require)\s+(\d+\s+)?(?:nos|pcs|units|items)?\s*([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[,\;\n\.]|\s*(?:delivery|pincode|qty|brand)|$)', email_text, re.IGNORECASE)
+        if need_match and need_match.group(2):
+            item_description = need_match.group(2).strip()
 
     # Extract 6-digit Indian pincode if present
     pincode_match = re.search(r'\b[1-9]\d{5}\b', email_text)
@@ -208,7 +239,6 @@ def fallback_extract_rfq(email_text):
 
         if content_lines:
             raw_desc = content_lines[0]
-            # Strip lead phrases like "the following item", "We have requirement of", etc.
             cleaned_desc = re.sub(
                 r'^(please\s+provide\s+quotation\s+for\s+)?(the\s+following\s+items?\.?\s*\(?|we\s+have\s+(a\s+)?requirement\s+(of|for)|requirement\s+(of|for)|(please\s+)?(provide|send)\s+(a\s+)?(quote|quotation|rate)\s+(for|of)|rfq\s+(for|of)|enquiry\s+(for|of)|(we\s+)?need|(we\s+)?require)\s*:?\s*\(?',
                 '',
@@ -241,22 +271,18 @@ def fallback_extract_rfq(email_text):
 
 
 # TEST ONLY
-
 if __name__ == "__main__":
-
     sample = """
-Need 50 Dell Latitude 5450 laptops.
-
-Specifications:
-Intel i7 Processor
-16GB RAM
-512GB SSD
-
-Delivery Date: 10 July 2026
-
-Delivery Location: Bangalore
-"""
+    Need 50 Dell Latitude 5450 laptops.
+    
+    Specifications:
+    Intel i7 Processor
+    16GB RAM
+    512GB SSD
+    
+    Delivery Date: 10 July 2026
+    Delivery Location: Bangalore
+    """
 
     rfq_data = extract_rfq(sample)
-
     print(rfq_data)

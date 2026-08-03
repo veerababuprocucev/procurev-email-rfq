@@ -21,22 +21,22 @@ NUMBER_WORDS = {
 
 PRODUCT_PATTERNS = [
     # 1. Subject / Header lines (cleanest product name)
-    r'\b(?:subject|re|rfq|enquiry|tender|quotation)\s*[:=\-]\s*([A-Za-z0-9\s\-\/\(\)]+?)(?=[;\n]|\s*(?:quantity|qty|brand|delivery)|$)',
+    r'\b(?:subject|re|rfq|enquiry|tender|quotation)\s*[:=\-]\s*([A-Za-z0-9\s\-\/\(\)]+?)(?=[;\n\.]|\s*(?:quantity|qty|brand|delivery)|$)',
 
     # 2. Tagged Item/Product fields
-    r'\b(?:item\s*name|product\s*name|item|product)\s*[:=\-]?\s*([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[;\n]|\s*(?:quantity|qty|brand|uom)|$)',
+    r'\b(?:item\s*name|product\s*name|item|product)\s*[:=\-]?\s*([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[;\n\.]|\s*(?:quantity|qty|brand|uom)|$)',
 
     # 3. Supply of / Procurement of / Purchase of
-    r'\b(?:supply\s+of|procurement\s+of|purchase\s+of)\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    r'\b(?:supply\s+of|procurement\s+of|purchase\s+of)\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
 
     # 4. Quotation for / Please quote for
-    r'\b(?:quotation\s+for|quote\s+for|please\s+quote\s+for)\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    r'\b(?:quotation\s+for|quote\s+for|please\s+quote\s+for)\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
 
     # 5. Requirement of/for
-    r'\b(?:requirement\s+(?:of|for))\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    r'\b(?:requirement\s+(?:of|for))\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
 
     # 6. Looking for / Need / Require
-    r'\b(?:looking\s+for|need|require)\s+(?:\d+\s+)?(?:nos|pcs|units|items)?\s*(?:of\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:for|delivery|pincode|qty|brand|location)|[;\n]|$)'
+    r'\b(?:looking\s+for|need|require)\s+(?:\d+\s+)?(?:nos|pcs|units|items)?\s*(?:of\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:for|delivery|pincode|qty|brand|location)|[;\n\.]|$)'
 ]
 
 SPEC_PATTERNS = [
@@ -55,6 +55,28 @@ SPEC_PATTERNS = [
 ]
 
 UOM_REGEX = r'\b(nos|pcs|kg|boxes?|packs?|each|ea|lot|lumpsum|sets?|pair|coil|roll|bundle|sheet|tons?|mt|kl|ltr|litres?|sqft|sqm|cum|mtr|meters?)\b'
+
+
+def is_generic_description(desc_str):
+    """
+    Checks if an item description is a generic filler word, prompt artifact, or table header row.
+    """
+    if not desc_str or not str(desc_str).strip():
+        return True
+    clean = re.sub(r'\s+', ' ', str(desc_str).strip().lower())
+    generic_keywords = [
+        "procurement request", "procurement", "request", "rfq", "enquiry", "quotation", "quote",
+        "description specification / make", "description specification make", "description specification",
+        "item description", "product description", "specification / make", "specification make",
+        "description / specification", "item name", "product name", "item", "product", "particulars",
+        "sl no", "s.no", "description", "specification", "make"
+    ]
+    if clean in generic_keywords:
+        return True
+    for g in generic_keywords:
+        if clean == g or clean.startswith(g + " ") or clean.endswith(" " + g):
+            return True
+    return False
 
 
 def normalize_date(date_str):
@@ -124,24 +146,24 @@ def validate_and_normalize_rfq(rfq_data, email_text):
     # Strip quantity suffixes like "- Ten Pcs", "- 100 Mtr", "- Twenty Boxes"
     desc = re.sub(r'[\-\:]?\s*(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred|\d+)\s*(?:nos|pcs|units?|items?|laptops?|sets?|mtr|meters?|kg|litres?|boxes?|packs?)\b.*$', '', desc, flags=re.IGNORECASE).strip()
 
-    # If desc is missing, < 2 words, < 10 chars, or generic word like "office", recover via PRODUCT_PATTERNS
-    if not desc or len(desc.split()) < 2 or len(desc) < 10 or desc.lower() in ["office", "printer", "laptop", "cable", "pipe", "paint", "item", "product", "procurement"]:
+    # If desc is missing, generic (e.g. "Description Specification / Make", "Procurement Request"), < 2 words, or < 10 chars, recover via PRODUCT_PATTERNS
+    if is_generic_description(desc) or len(desc.split()) < 2 or len(desc) < 10:
         for p in PRODUCT_PATTERNS:
             m = re.search(p, email_text, re.IGNORECASE)
             if m:
                 extracted = m.group(1).strip()
                 extracted = re.sub(r'^(?:the\s+)?(?:supply\s+of\s+)?', '', extracted, flags=re.IGNORECASE).strip()
-                if extracted and len(extracted.split()) >= 1 and extracted.lower() not in ["office", "item", "printer", "laptop", "cable", "pipe", "paint"]:
+                if extracted and not is_generic_description(extracted):
                     desc = extracted
                     break
 
     # Safe fallback check before defaulting
-    if not desc:
-        m_fall = re.search(r'supply\s+of\s+(.+?)(?=\s+required|\.)', email_text, re.IGNORECASE)
-        if m_fall:
+    if is_generic_description(desc):
+        m_fall = re.search(r'supply\s+of\s+(.+?)(?=\s+required|\s+needed|[,\;\n\.]|$)', email_text, re.IGNORECASE)
+        if m_fall and not is_generic_description(m_fall.group(1).strip()):
             desc = m_fall.group(1).strip()
 
-    rfq_data["item_description"] = desc or "Procurement Request"
+    rfq_data["item_description"] = desc if not is_generic_description(desc) else "Procurement Request"
 
     # 2. QUANTITY VALIDATION (Digits + Word Numbers + "Qty : Five" Support)
     qty_word = re.search(r'(?:qty|quantity|count)\s*[:=\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b', email_text, re.IGNORECASE)

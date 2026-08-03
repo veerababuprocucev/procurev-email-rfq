@@ -20,14 +20,15 @@ NUMBER_WORDS = {
 }
 
 PRODUCT_PATTERNS = [
-    r'supply\s+of\s+(.+?)(?=\s+required|\s+needed|\s+for\s+our|\n|$)',
-    r'procurement\s+of\s+(.+?)(?=\n|$)',
-    r'purchase\s+of\s+(.+?)(?=\n|$)',
-    r'quotation\s+for\s+(.+?)(?=\n|$)',
-    r'please\s+quote\s+for\s+(.+?)(?=\n|$)',
-    r'looking\s+for\s+(.+?)(?=\n|$)',
-    r'need\s+\d*\s*(.+?)(?=\n|$)',
-    r'item\s*name\s*[:=\-]?\s*(.+)'
+    r'supply\s+of\s+(.+?)(?=\s+required|\s+needed|\s+for\s+our|[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    r'procurement\s+of\s+(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    r'purchase\s+of\s+(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    r'quotation\s+for\s+(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    r'please\s+quote\s+for\s+(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    r'requirement\s+(?:of|for)\s+(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    r'looking\s+for\s+(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    r'need\s+\d*\s*(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    r'item\s*name\s*[:=\-]?\s*(.+?)(?=[,\;\n]|\s*(?:quantity|qty|brand|uom)|$)'
 ]
 
 SPEC_PATTERNS = [
@@ -204,15 +205,20 @@ def validate_and_normalize_rfq(rfq_data, email_text):
 
     rfq_data["delivery_date"] = normalize_date(delivery_date)
 
-    # 7. DELIVERY LOCATION & PINCODE EXTRACTION
-    loc = re.search(r'(?:delivery\s+location|delivery\s+address|delivery\s+site|ship\s+to|destination)\s*[:=\-]\s*([A-Za-z0-9\s,\-]+?)(?=[,\;\n\.]|\s*(?:specs|specifications|quantity|qty|brand|date)|$)', email_text, re.IGNORECASE)
+    # 7. DELIVERY LOCATION, STATE & PINCODE EXTRACTION
+    loc = re.search(r'(?:delivery\s+location|delivery\s+address|delivery\s+site|ship\s+to|destination|location|site)\s*[:=\-]\s*([^\n]+?)(?=\s*(?:specs|specifications|quantity|qty|brand|date|\n)|$)', email_text, re.IGNORECASE)
     if loc:
         location_raw = loc.group(1).strip()
         pin = re.search(r'\b\d{6}\b', location_raw)
         if pin:
             rfq_data["delivery_pincode"] = pin.group()
-        city = re.sub(r'\b\d{6}\b', '', location_raw).strip(" ,.")
-        rfq_data["delivery_city"] = city
+
+        clean_loc = re.sub(r'\b\d{6}\b', '', location_raw).strip(" ,.")
+        parts = [p.strip() for p in clean_loc.split(',') if p.strip()]
+        if parts:
+            rfq_data["delivery_city"] = parts[0]
+            if len(parts) > 1 and not rfq_data.get("delivery_state"):
+                rfq_data["delivery_state"] = parts[1]
 
     return rfq_data
 

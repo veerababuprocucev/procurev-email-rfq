@@ -109,8 +109,10 @@ def process_emails():
             f"Delivery Date    : {rfq_data.get('delivery_date', '')}"
         )
 
+        loc_parts = [rfq_data.get('delivery_city', ''), rfq_data.get('delivery_state', ''), rfq_data.get('delivery_pincode', '')]
+        loc_str = ", ".join([p for p in loc_parts if p]).strip()
         print(
-            f"Delivery Location: {rfq_data.get('delivery_location', '')}"
+            f"Delivery Location: {loc_str}"
         )
 
         print(

@@ -85,7 +85,7 @@ Email:
                     "temperature": 0.0
                 }
             },
-            timeout=10
+            timeout=20
         )
     except Exception as e:
         print(f"\n[WARNING] Ollama server unavailable ({e}). Switching to rule-based fallback extraction...")
@@ -120,7 +120,7 @@ Email:
     required_keys = [
         "item_description", "specifications", "quantity",
         "uom", "brand", "delivery_date", "delivery_city",
-        "delivery_state", "delivery_pincode", "delivery_location"
+        "delivery_state", "delivery_pincode"
     ]
     for key in required_keys:
         if key not in rfq_data:
@@ -267,8 +267,7 @@ def fallback_extract_rfq(email_text):
         "delivery_date": delivery_date,
         "delivery_city": delivery_city,
         "delivery_state": delivery_state,
-        "delivery_pincode": delivery_pincode,
-        "delivery_location": ""
+        "delivery_pincode": delivery_pincode
     }
 
 

@@ -74,7 +74,7 @@ SPEC_PATTERNS: List[str] = [
     r'Wi-Fi|Bluetooth|HDMI|Gigabit'
 ]
 
-UOM_REGEX: str = r'\b(nos|pcs|kg|boxes?|packs?|bags?|each|ea|lot|lumpsum|sets?|pair|coil|roll|bundle|sheet|tons?|mt|kl|ltr|litres?|sqft|sqm|cum|mtr|meters?)\b'
+UOM_REGEX: str = r'\b(nos|pcs|kg|boxes?|packs?|bags?|each|ea|lot|lumpsum|sets?|pair|coil|roll|bundle|sheet|tons?|mt|kl|ltr|litres?|sqft|sqm|cum|mtr|meters?|laptops?|printers?|units?|items?)\b'
 
 
 # ---------------------------------------------------------------------------
@@ -212,13 +212,16 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
 
     rfq_data["item_description"] = desc if not is_generic_description(desc) else "Procurement Request"
 
-    # 2. QUANTITY VALIDATION (Digits + Word Numbers + "Qty : Five" Support + Model Protection)
-    qty_word = re.search(r'(?:qty|quantity|count)\s*[:=\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b', email_text, re.IGNORECASE)
-    word_qty = re.search(r'\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b(?:\s*(nos|pcs|units?|items?|laptops?|sets?|mtr|meters?|kg|litres?|boxes?|packs?))?', email_text, re.IGNORECASE)
+    # 2. QUANTITY VALIDATION (Explicit + Need Verb + Word Numbers + Unit Digits)
     explicit_qty = re.search(r'(?:quantity|qty|count)\s*[:=\-]?\s*(\d+)', email_text, re.IGNORECASE)
+    need_qty = re.search(r'\b(?:need|require|looking\s+for|procure|purchase|want|supply\s+of|quotation\s+for|requirement\s+(?:for|of))\s+(?:\d*\s+)?(\d{1,4})\b', email_text, re.IGNORECASE)
+    qty_word = re.search(r'(?:qty|quantity|count)\s*[:=\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b', email_text, re.IGNORECASE)
+    word_qty = re.search(r'\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b(?:\s*' + UOM_REGEX + ')?', email_text, re.IGNORECASE)
 
     if explicit_qty:
         quantity = int(explicit_qty.group(1))
+    elif need_qty:
+        quantity = int(need_qty.group(1))
     elif qty_word:
         quantity = NUMBER_WORDS.get(qty_word.group(1).lower(), 1)
     elif word_qty:

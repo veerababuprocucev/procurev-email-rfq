@@ -189,7 +189,7 @@ def fallback_extract_rfq(email_text):
     delivery_pincode = ""
     specifications = ""
 
-    # Issue 6: Comprehensive Quantity Extraction
+    # 1. ACCURATE QUANTITY & UOM EXTRACTION
     explicit_qty = re.search(r'(?:quantity|qty|count)\s*[:=\-]?\s*(\d+)', email_text, re.IGNORECASE)
     if explicit_qty:
         try:
@@ -197,18 +197,28 @@ def fallback_extract_rfq(email_text):
         except Exception:
             quantity = 1
     else:
-        unit_qty = re.search(r'\b(\d{1,4})\s*(nos|pcs|units?|items?|laptops?|sets?|mtr|meters?|kg|litres?|qty|boxes?|packs?)\b', email_text, re.IGNORECASE)
-        if unit_qty:
-            try:
-                quantity = int(unit_qty.group(1))
-                if unit_qty.group(2):
-                    uom = unit_qty.group(2).capitalize()
-            except Exception:
-                quantity = 1
+        # Check "Need 50 Dell Latitude..." or "25 Nos" or "100 Litres"
+        need_qty = re.search(r'\b(?:need|required?|looking\s+for|require)\s+(\d{1,4})\b', email_text, re.IGNORECASE)
+        if need_qty:
+            quantity = int(need_qty.group(1))
         else:
-            quantity = 1
+            unit_qty = re.search(r'\b(\d{1,4})\s*(nos|pcs|units?|items?|laptops?|sets?|mtr|meters?|kg|litres?|qty|boxes?|packs?)\b', email_text, re.IGNORECASE)
+            if unit_qty:
+                try:
+                    quantity = int(unit_qty.group(1))
+                    if unit_qty.group(2):
+                        uom = unit_qty.group(2).capitalize()
+                except Exception:
+                    quantity = 1
+            else:
+                quantity = 1
 
-    # Issue 5: High Accuracy Brand Detection
+    # Extract UOM if explicitly mentioned in text (e.g. "100 Litres", "50 Mtr")
+    uom_match = re.search(r'\b\d+\s*(nos|pcs|units?|items?|laptops?|sets?|mtr|meters?|kg|litres?|boxes?|packs?)\b', email_text, re.IGNORECASE)
+    if uom_match and uom_match.group(1):
+        uom = uom_match.group(1).capitalize()
+
+    # 2. BRAND EXTRACTION
     brand_match = re.search(r'(?:brand|make|manufacturer)\s*[:=\-]?\s*([A-Za-z0-9\s]+(?:\([A-Za-z0-9\s]+\))?)', email_text, re.IGNORECASE)
     if brand_match:
         brand = brand_match.group(1).strip()
@@ -219,26 +229,23 @@ def fallback_extract_rfq(email_text):
                 brand = b
                 break
 
-    # Issue 4: Advanced Item Name Patterns ("Item Name:", "Need 25...", "Required 50...")
+    # 3. ACCURATE ITEM NAME EXTRACTION
     item_name_match = re.search(r'(?:item\s*name|product\s*name|item|product)\s*[:=\-]?\s*([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[,\;\n]|\s*(?:quantity|qty|brand|uom)|$)', email_text, re.IGNORECASE)
     if item_name_match:
         extracted_name = item_name_match.group(1).strip()
         if len(extracted_name) > 2 and not extracted_name.lower().startswith("the following"):
             item_description = extracted_name
 
-    # "Need 25 Dell Laptops" or "Required 50 CPVC Pipes"
+    # "Need 50 Dell Laptops" or "Looking for 200 Units of Havells Wires"
     if not item_description:
-        need_match = re.search(r'(?:need|required?|looking\s+for|require)\s+(\d+\s+)?(?:nos|pcs|units|items)?\s*([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[,\;\n\.]|\s*(?:delivery|pincode|qty|brand)|$)', email_text, re.IGNORECASE)
-        if need_match and need_match.group(2):
-            item_description = need_match.group(2).strip()
+        need_match = re.search(r'(?:need|required?|looking\s+for|require)\s+(?:\d+\s+)?(?:nos|pcs|units|items)?\s*(?:of\s+)?([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[,\;\n\.]|\s*(?:delivery|pincode|qty|brand|location)|$)', email_text, re.IGNORECASE)
+        if need_match and need_match.group(1):
+            cleaned_need = need_match.group(1).strip()
+            if cleaned_need and len(cleaned_need) > 2:
+                item_description = cleaned_need
 
-    # Extract 6-digit Indian pincode if present
-    pincode_match = re.search(r'\b[1-9]\d{5}\b', email_text)
-    if pincode_match:
-        delivery_pincode = pincode_match.group(0)
-
-    # Filter out common greeting/signature lines if item_description is not found yet
-    if not item_description:
+    # Lead phrase cleanup for generic sentences
+    if not item_description or item_description.lower().startswith("kindly") or item_description.lower().startswith("please"):
         ignore_words = ["hi", "hello", "dear", "thanks", "regards", "subject:", "team", "from:", "sent:"]
         content_lines = []
         for line in lines:
@@ -248,7 +255,7 @@ def fallback_extract_rfq(email_text):
         if content_lines:
             raw_desc = content_lines[0]
             cleaned_desc = re.sub(
-                r'^(please\s+provide\s+quotation\s+for\s+)?(the\s+following\s+items?\.?\s*\(?|we\s+have\s+(a\s+)?requirement\s+(of|for)|requirement\s+(of|for)|(please\s+)?(provide|send)\s+(a\s+)?(quote|quotation|rate)\s+(for|of)|rfq\s+(for|of)|enquiry\s+(for|of)|(we\s+)?need|(we\s+)?require)\s*:?\s*\(?',
+                r'^(kindly\s+(send|share|provide)\s+(rate|price|quote|quotation)\s+(for|of)|please\s+provide\s+quotation\s+for|the\s+following\s+items?\.?\s*\(?|we\s+have\s+(a\s+)?requirement\s+(of|for)|requirement\s+(of|for)|(please\s+)?(provide|send)\s+(a\s+)?(quote|quotation|rate)\s+(for|of)|rfq\s+(for|of)|enquiry\s+(for|of)|(we\s+)?need|(we\s+)?require)\s*:?\s*\(?',
                 '',
                 raw_desc,
                 flags=re.IGNORECASE
@@ -258,6 +265,10 @@ def fallback_extract_rfq(email_text):
             specifications = ", ".join(content_lines[1:4])[:250] if len(content_lines) > 1 else item_description
         else:
             item_description = "Procurement Request"
+
+    # Strip lead "of " if present
+    if item_description.lower().startswith("of "):
+        item_description = item_description[3:].strip()
 
     if not specifications:
         specifications = f"{item_description}" + (f", Brand: {brand}" if brand else "")

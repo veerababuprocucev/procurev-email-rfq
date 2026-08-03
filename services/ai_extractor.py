@@ -142,7 +142,7 @@ Email Content:
 def fallback_extract_rfq(email_text):
     """
     Fallback extractor when Ollama AI server is offline or unavailable.
-    Uses smart regex patterns to clean boilerplate phrases and extract full item descriptions.
+    Uses targeted regex patterns to extract quantity, brand, item description, and specs accurately.
     """
     if not email_text:
         email_text = ""
@@ -159,62 +159,72 @@ def fallback_extract_rfq(email_text):
     delivery_pincode = ""
     specifications = ""
 
-    # Extract quantity
-    qty_match = re.search(r'\b(\d+)\s*(nos|pcs|units|items|laptops|qty)?\b', email_text, re.IGNORECASE)
-    if qty_match:
+    # 1. ACCURATE QUANTITY EXTRACTION
+    # First check explicit "Quantity: 25" or "Qty: 25"
+    explicit_qty = re.search(r'(?:quantity|qty|count)\s*[:=\-]?\s*(\d+)', email_text, re.IGNORECASE)
+    if explicit_qty:
         try:
-            quantity = int(qty_match.group(1))
-            if qty_match.group(2):
-                uom = qty_match.group(2).capitalize()
+            quantity = int(explicit_qty.group(1))
         except Exception:
             quantity = 1
     else:
-        quantity = 1
+        # Check number followed by unit keyword e.g. "25 Nos", "25 Pcs", "25 Laptops"
+        unit_qty = re.search(r'\b(\d{1,3})\s*(nos|pcs|units|items|laptops|sets|mtr|kg|litres|qty)\b', email_text, re.IGNORECASE)
+        if unit_qty:
+            try:
+                quantity = int(unit_qty.group(1))
+                if unit_qty.group(2):
+                    uom = unit_qty.group(2).capitalize()
+            except Exception:
+                quantity = 1
+        else:
+            quantity = 1
+
+    # 2. BRAND EXTRACTION
+    brand_match = re.search(r'(?:brand|make|manufacturer)\s*[:=\-]?\s*([A-Za-z0-9\s]+(?:\([A-Za-z0-9\s]+\))?)', email_text, re.IGNORECASE)
+    if brand_match:
+        brand = brand_match.group(1).strip()
+
+    # 3. ACCURATE ITEM NAME EXTRACTION
+    # Check for explicit "Item Name: Dell Latitude 5450 Laptop"
+    item_name_match = re.search(r'(?:item\s*name|product\s*name|item|product)\s*[:=\-]?\s*([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[,\;\n]|\s*(?:quantity|qty|brand|uom)|$)', email_text, re.IGNORECASE)
+    if item_name_match:
+        extracted_name = item_name_match.group(1).strip()
+        if len(extracted_name) > 2 and not extracted_name.lower().startswith("the following"):
+            item_description = extracted_name
 
     # Extract 6-digit Indian pincode if present
     pincode_match = re.search(r'\b[1-9]\d{5}\b', email_text)
     if pincode_match:
         delivery_pincode = pincode_match.group(0)
 
-    # Filter out common greeting/signature lines
-    ignore_words = ["hi", "hello", "dear", "thanks", "regards", "subject:", "team", "from:", "sent:"]
-    content_lines = []
-    for line in lines:
-        if not any(line.lower().startswith(w) for w in ignore_words):
-            content_lines.append(line)
+    # Filter out common greeting/signature lines if item_description is not found yet
+    if not item_description:
+        ignore_words = ["hi", "hello", "dear", "thanks", "regards", "subject:", "team", "from:", "sent:"]
+        content_lines = []
+        for line in lines:
+            if not any(line.lower().startswith(w) for w in ignore_words):
+                content_lines.append(line)
 
-    if content_lines:
-        # Strip lead phrases like "We have requirement of", "RFQ for", etc.
-        raw_desc = content_lines[0]
-        cleaned_desc = re.sub(
-            r'^(we\s+have\s+(a\s+)?requirement\s+(of|for)|requirement\s+(of|for)|(please\s+)?(provide|send)\s+(a\s+)?(quote|quotation|rate)\s+(for|of)|rfq\s+(for|of)|enquiry\s+(for|of)|(we\s+)?need|(we\s+)?require)\s*:?\s*',
-            '',
-            raw_desc,
-            flags=re.IGNORECASE
-        ).strip().rstrip(":")
+        if content_lines:
+            raw_desc = content_lines[0]
+            # Strip lead phrases like "the following item", "We have requirement of", etc.
+            cleaned_desc = re.sub(
+                r'^(please\s+provide\s+quotation\s+for\s+)?(the\s+following\s+items?\.?\s*\(?|we\s+have\s+(a\s+)?requirement\s+(of|for)|requirement\s+(of|for)|(please\s+)?(provide|send)\s+(a\s+)?(quote|quotation|rate)\s+(for|of)|rfq\s+(for|of)|enquiry\s+(for|of)|(we\s+)?need|(we\s+)?require)\s*:?\s*\(?',
+                '',
+                raw_desc,
+                flags=re.IGNORECASE
+            ).strip().rstrip(":")
 
-        # Collect detailed line items if present
-        item_details = []
-        for line in content_lines[1:6]:
-            # Look for numbered or bulleted list items (e.g. 1. CPVC Pipe, - Ball Valve)
-            clean_item = re.sub(r'^[\d\.\-\*\•\s]+', '', line).strip()
-            if clean_item and len(clean_item) > 3 and not re.search(r'delivery|pincode|location', clean_item, re.IGNORECASE):
-                item_details.append(clean_item)
-
-        if item_details:
-            details_str = ", ".join(item_details[:4])
-            if cleaned_desc:
-                item_description = f"{cleaned_desc} ({details_str})"[:180]
-            else:
-                item_description = details_str[:180]
-            specifications = details_str[:250]
-        else:
             item_description = (cleaned_desc or raw_desc)[:180]
             specifications = ", ".join(content_lines[1:4])[:250] if len(content_lines) > 1 else item_description
-    else:
-        item_description = "Plumbing Materials & Fittings"
+        else:
+            item_description = "Procurement Request"
 
-    print(f"[EXTRACTED ITEM DESCRIPTION]: '{item_description}' (Qty: {quantity})")
+    if not specifications:
+        specifications = f"{item_description}" + (f", Brand: {brand}" if brand else "")
+
+    print(f"[EXTRACTED ITEM]: '{item_description}' | Qty: {quantity} {uom} | Brand: '{brand}'")
 
     return {
         "item_description": item_description,

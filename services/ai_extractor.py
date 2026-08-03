@@ -94,7 +94,7 @@ def validate_and_normalize_rfq(rfq_data, email_text):
                     desc = extracted
                     break
 
-    # Clean lead filler phrases
+    # Clean lead filler phrases and prefixes
     desc = re.sub(
         r'^(we\s+request\s+you\s+to\s+submit\s+your\s+quotation\s+for\s+the\s+supply\s+of|please\s+provide\s+quotation\s+for\s+)?(the\s+following\s+items?\.?\s*\(?|we\s+have\s+(a\s+)?requirement\s+(of|for)|requirement\s+(of|for)|(please\s+)?(provide|send)\s+(a\s+)?(quote|quotation|rate)\s+(for|of)|rfq\s+(for|of)|enquiry\s+(for|of)|(we\s+)?need|(we\s+)?require)\s*:?\s*\(?',
         '', desc, flags=re.IGNORECASE
@@ -103,30 +103,38 @@ def validate_and_normalize_rfq(rfq_data, email_text):
     if desc.lower().startswith("of "):
         desc = desc[3:].strip()
 
+    # Strip leading "Units of ", "Pcs of ", "Nos of "
+    desc = re.sub(r'^(?:units?|pcs|nos|items?|packs?|boxes?)\s+of\s+', '', desc, flags=re.IGNORECASE).strip()
+
+    # Strip quantity suffixes like "- Ten Pcs", "- 100 Mtr", "- Twenty Boxes"
+    desc = re.sub(r'[\-\:]?\s*(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred|\d+)\s*(?:nos|pcs|units?|items?|laptops?|sets?|mtr|meters?|kg|litres?|boxes?|packs?)\b.*$', '', desc, flags=re.IGNORECASE).strip()
+
     rfq_data["item_description"] = desc or "Procurement Request"
 
-    # 2. QUANTITY VALIDATION (Digits + Word Numbers)
-    try:
-        quantity = int(rfq_data.get("quantity", 0))
-    except Exception:
-        quantity = 0
+    # 2. QUANTITY VALIDATION (Digits + Word Numbers + Model Number Protection)
+    word_qty = re.search(r'\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b(?:\s*(nos|pcs|units?|items?|laptops?|sets?|mtr|meters?|kg|litres?|boxes?|packs?))?', email_text, re.IGNORECASE)
+    explicit_qty = re.search(r'(?:quantity|qty|count)\s*[:=\-]?\s*(\d+)', email_text, re.IGNORECASE)
 
-    if quantity <= 0:
-        explicit_qty = re.search(r'(?:quantity|qty|count)\s*[:=\-]?\s*(\d+)', email_text, re.IGNORECASE)
-        if explicit_qty:
-            quantity = int(explicit_qty.group(1))
-        else:
+    if explicit_qty:
+        quantity = int(explicit_qty.group(1))
+    elif word_qty:
+        quantity = NUMBER_WORDS.get(word_qty.group(1).lower(), 1)
+        if word_qty.group(2) and not rfq_data.get("uom"):
+            rfq_data["uom"] = word_qty.group(2).capitalize()
+    else:
+        try:
+            quantity = int(rfq_data.get("quantity", 0))
+        except Exception:
+            quantity = 0
+
+        if quantity <= 0 or quantity > 5000:
             unit_qty = re.search(r'\b(\d{1,4})\s*(nos|pcs|units?|items?|laptops?|sets?|mtr|meters?|kg|litres?|qty|boxes?|packs?)\b', email_text, re.IGNORECASE)
             if unit_qty:
                 quantity = int(unit_qty.group(1))
                 if unit_qty.group(2) and not rfq_data.get("uom"):
                     rfq_data["uom"] = unit_qty.group(2).capitalize()
             else:
-                word_qty = re.search(r'\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b', email_text, re.IGNORECASE)
-                if word_qty:
-                    quantity = NUMBER_WORDS.get(word_qty.group(1).lower(), 1)
-                else:
-                    quantity = 1
+                quantity = 1
 
     rfq_data["quantity"] = quantity
 

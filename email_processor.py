@@ -331,6 +331,7 @@ def process_emails():
                             rfq_documents.append(
                                 {
                                     "fileName": filename,
+                                    "file": file_content,
                                     "fileContent": file_content
                                 }
                             )

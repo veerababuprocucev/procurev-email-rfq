@@ -20,15 +20,23 @@ NUMBER_WORDS = {
 }
 
 PRODUCT_PATTERNS = [
-    r'supply\s+of\s+(.+?)(?=\s+required|\s+needed|\s+for\s+our|[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
-    r'procurement\s+of\s+(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
-    r'purchase\s+of\s+(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
-    r'quotation\s+for\s+(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
-    r'please\s+quote\s+for\s+(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
-    r'requirement\s+(?:of|for)\s+(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
-    r'looking\s+for\s+(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
-    r'need\s+\d*\s*(.+?)(?=[,\;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
-    r'item\s*name\s*[:=\-]?\s*(.+?)(?=[,\;\n]|\s*(?:quantity|qty|brand|uom)|$)'
+    # 1. Subject / Header lines (cleanest product name)
+    r'\b(?:subject|re|rfq|enquiry|tender|quotation)\s*[:=\-]\s*([A-Za-z0-9\s\-\/\(\)]+?)(?=[;\n]|\s*(?:quantity|qty|brand|delivery)|$)',
+
+    # 2. Tagged Item/Product fields
+    r'\b(?:item\s*name|product\s*name|item|product)\s*[:=\-]?\s*([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[;\n]|\s*(?:quantity|qty|brand|uom)|$)',
+
+    # 3. Supply of / Procurement of / Purchase of
+    r'\b(?:supply\s+of|procurement\s+of|purchase\s+of)\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+
+    # 4. Quotation for / Please quote for
+    r'\b(?:quotation\s+for|quote\s+for|please\s+quote\s+for)\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+
+    # 5. Requirement of/for
+    r'\b(?:requirement\s+(?:of|for))\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+
+    # 6. Looking for / Need / Require
+    r'\b(?:looking\s+for|need|require)\s+(?:\d+\s+)?(?:nos|pcs|units|items)?\s*(?:of\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:for|delivery|pincode|qty|brand|location)|[;\n]|$)'
 ]
 
 SPEC_PATTERNS = [

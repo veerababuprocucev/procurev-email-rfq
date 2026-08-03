@@ -137,6 +137,7 @@ def read_unread_emails():
 
             attachment_type = ""
             attachment_path = ""
+            attachments_list = []
 
             if msg.is_multipart():
 
@@ -146,7 +147,7 @@ def read_unread_emails():
                         part.get_content_type()
                     )
 
-                    filename = (
+                    raw_filename = (
                         part.get_filename()
                     )
 
@@ -155,7 +156,7 @@ def read_unread_emails():
                     if (
                         content_type
                         == "text/plain"
-                        and not filename
+                        and not raw_filename
                     ):
 
                         try:
@@ -175,49 +176,82 @@ def read_unread_emails():
 
                     # Attachments
 
-                    if filename:
+                    if raw_filename:
+                        # Decode RFC 2047 / MIME header filename
+                        from email.header import decode_header
+                        try:
+                            decoded_fragments = decode_header(raw_filename)
+                            fn_parts = []
+                            for frag, enc in decoded_fragments:
+                                if isinstance(frag, bytes):
+                                    fn_parts.append(frag.decode(enc or 'utf-8', errors='ignore'))
+                                else:
+                                    fn_parts.append(str(frag))
+                            filename = "".join(fn_parts).strip()
+                            filename = os.path.basename(filename)
+                        except Exception:
+                            filename = os.path.basename(raw_filename)
 
-                        os.makedirs(
-                            "attachments",
-                            exist_ok=True
-                        )
+                        if not filename:
+                            continue
 
-                        file_path = (
-                            os.path.join(
+                        # Extract payload safely
+                        payload = part.get_payload(decode=True)
+                        if not payload:
+                            raw_p = part.get_payload()
+                            if isinstance(raw_p, str):
+                                try:
+                                    import base64
+                                    payload = base64.b64decode(raw_p)
+                                except Exception:
+                                    payload = raw_p.encode("utf-8")
+                            elif isinstance(raw_p, bytes):
+                                payload = raw_p
+
+                        # Prevent writing 0-byte or None files
+                        if payload and len(payload) > 0:
+                            os.makedirs(
                                 "attachments",
-                                filename
+                                exist_ok=True
                             )
-                        )
 
-                        with open(
-                            file_path,
-                            "wb"
-                        ) as f:
-
-                            f.write(
-                                part.get_payload(
-                                    decode=True
+                            file_path = (
+                                os.path.join(
+                                    "attachments",
+                                    filename
                                 )
                             )
-                        
-                        extension = (
-                            os.path.splitext(
-                                file_path
-                            )[1]
-                            .lower()
-                        )
-                        attachment_type = extension
-                        attachment_path = file_path
-                        extracted_text = (
-                            extract_attachment_text(
-                                file_path
-                            )
-                        )
 
-                        attachment_text += (
-                            "\n\n"
-                            + extracted_text
-                        )
+                            with open(
+                                file_path,
+                                "wb"
+                            ) as f:
+                                f.write(payload)
+                            
+                            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                                extension = (
+                                    os.path.splitext(
+                                        file_path
+                                    )[1]
+                                    .lower()
+                                )
+                                attachment_type = extension
+                                attachment_path = file_path
+                                attachments_list.append({
+                                    "path": file_path,
+                                    "filename": filename,
+                                    "type": extension
+                                })
+                                extracted_text = (
+                                    extract_attachment_text(
+                                        file_path
+                                    )
+                                )
+
+                                attachment_text += (
+                                    "\n\n"
+                                    + extracted_text
+                                )
 
             else:
 
@@ -248,7 +282,8 @@ def read_unread_emails():
                     "subject": subject,
                     "body": final_body,
                     "attachment_type": attachment_type,
-                    "attachment_path": attachment_path
+                    "attachment_path": attachment_path,
+                    "attachments": attachments_list
                 }
             )
             mail.store(

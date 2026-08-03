@@ -301,41 +301,42 @@ def process_emails():
 
         rfq_documents = []
 
-        attachment_path = email_data.get(
-            "attachment_path",
-            ""
-        )
+        attachment_items = email_data.get("attachments", [])
+        if not attachment_items and email_data.get("attachment_path"):
+            single_path = email_data.get("attachment_path")
+            if os.path.exists(single_path) and os.path.getsize(single_path) > 0:
+                attachment_items = [{
+                    "path": single_path,
+                    "filename": os.path.basename(single_path)
+                }]
 
-        if attachment_path:
+        for att in attachment_items:
+            file_path = att.get("path")
+            filename = att.get("filename") or os.path.basename(file_path)
 
-            try:
+            if file_path and os.path.exists(file_path):
+                file_size = os.path.getsize(file_path)
+                if file_size == 0:
+                    print(f"Skipping 0-byte empty attachment: {filename}")
+                    continue
 
-                with open(
-                    attachment_path,
-                    "rb"
-                ) as file:
+                try:
+                    with open(file_path, "rb") as file:
+                        raw_bytes = file.read()
 
-                    file_content = (
-                        base64.b64encode(
-                            file.read()
-                        ).decode("utf-8")
-                    )
+                    if len(raw_bytes) > 0:
+                        file_content = base64.b64encode(raw_bytes).decode("utf-8")
 
-                rfq_documents.append(
-                    {
-                        "fileName":
-                        os.path.basename(attachment_path),
-
-                        "fileContent":
-                        file_content
-                    }
-                )
-
-            except Exception as e:
-
-                print(
-                    f"Attachment Error: {e}"
-                )
+                        if file_content and len(file_content) > 0:
+                            rfq_documents.append(
+                                {
+                                    "fileName": filename,
+                                    "fileContent": file_content
+                                }
+                            )
+                            print(f"Attachment Processed Successfully: {filename} ({file_size} bytes, b64_len={len(file_content)})")
+                except Exception as e:
+                    print(f"Attachment Error for {filename}: {e}")
 
         # -----------------------------
         # RFQ Object

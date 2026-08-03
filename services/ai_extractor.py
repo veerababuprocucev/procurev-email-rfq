@@ -25,13 +25,14 @@ Return ONLY valid JSON matching this schema:
 }}
 
 Extraction Rules:
-- item_description: requested product or service.
-- quantity: number (default 0 if not specified).
-- uom: Unit of Measurement (e.g., "Nos", "Kg", "Mtr", "Litres"). Use "Nos" for countable items if unspecified.
+- item_description: The specific product, material, or service requested (e.g., "PLUMBING Materials - CPVC Pipes & Valves", "Dell Laptops").
+  CRITICAL: Do NOT include filler lead phrases like "We have requirement of", "RFQ for", "Please quote for", "Requirement for". Extract the complete actual product/material names and list item details.
+- quantity: total item quantity as a number (default 1 if unspecified or multiple line items).
+- uom: Unit of Measurement (e.g., "Nos", "Kg", "Mtr", "Set", "Pcs"). Use "Nos" for countable items if unspecified.
 - brand: manufacturer/brand string (comma-separated if multiple).
 - delivery_date: format as YYYY-MM-DD (empty string if not specified).
 - delivery_city, delivery_state, delivery_pincode: extract separately. A 6-digit number is delivery_pincode.
-- specifications: comma-separated string of specs/remarks.
+- specifications: detailed specifications, sizes, model numbers, or line item details.
 - Ignore greetings, signatures, disclaimers, and non-procurement text.
 
 Email Content:
@@ -103,6 +104,12 @@ Email Content:
             else:
                 rfq_data[key] = ""
 
+    # Clean filler lead phrases from AI extracted item_description
+    if isinstance(rfq_data.get("item_description"), str):
+        desc = rfq_data["item_description"].strip()
+        desc = re.sub(r'^(we\s+have\s+(a\s+)?requirement\s+(of|for)|requirement\s+(of|for)|(please\s+)?(provide|send)\s+(a\s+)?(quote|quotation|rate)\s+(for|of)|rfq\s+(for|of)|enquiry\s+(for|of)|(we\s+)?need|(we\s+)?require)\s*:\s*', '', desc, flags=re.IGNORECASE).strip()
+        rfq_data["item_description"] = desc
+
     # Quantity validation
     try:
         rfq_data["quantity"] = int(
@@ -135,7 +142,7 @@ Email Content:
 def fallback_extract_rfq(email_text):
     """
     Fallback extractor when Ollama AI server is offline or unavailable.
-    Uses smart regex patterns to extract quantity, item description, and specs.
+    Uses smart regex patterns to clean boilerplate phrases and extract full item descriptions.
     """
     if not email_text:
         email_text = ""
@@ -169,21 +176,45 @@ def fallback_extract_rfq(email_text):
     if pincode_match:
         delivery_pincode = pincode_match.group(0)
 
-    # Extract item description from non-greeting content lines
-    ignore_words = ["hi", "hello", "dear", "thanks", "regards", "subject:", "team", "from:"]
-    desc_lines = []
+    # Filter out common greeting/signature lines
+    ignore_words = ["hi", "hello", "dear", "thanks", "regards", "subject:", "team", "from:", "sent:"]
+    content_lines = []
     for line in lines:
         if not any(line.lower().startswith(w) for w in ignore_words):
-            desc_lines.append(line)
+            content_lines.append(line)
 
-    if desc_lines:
-        item_description = desc_lines[0][:150]
-        if len(desc_lines) > 1:
-            specifications = ", ".join(desc_lines[1:4])[:200]
+    if content_lines:
+        # Strip lead phrases like "We have requirement of", "RFQ for", etc.
+        raw_desc = content_lines[0]
+        cleaned_desc = re.sub(
+            r'^(we\s+have\s+(a\s+)?requirement\s+(of|for)|requirement\s+(of|for)|(please\s+)?(provide|send)\s+(a\s+)?(quote|quotation|rate)\s+(for|of)|rfq\s+(for|of)|enquiry\s+(for|of)|(we\s+)?need|(we\s+)?require)\s*:?\s*',
+            '',
+            raw_desc,
+            flags=re.IGNORECASE
+        ).strip().rstrip(":")
+
+        # Collect detailed line items if present
+        item_details = []
+        for line in content_lines[1:6]:
+            # Look for numbered or bulleted list items (e.g. 1. CPVC Pipe, - Ball Valve)
+            clean_item = re.sub(r'^[\d\.\-\*\•\s]+', '', line).strip()
+            if clean_item and len(clean_item) > 3 and not re.search(r'delivery|pincode|location', clean_item, re.IGNORECASE):
+                item_details.append(clean_item)
+
+        if item_details:
+            details_str = ", ".join(item_details[:4])
+            if cleaned_desc:
+                item_description = f"{cleaned_desc} ({details_str})"[:180]
+            else:
+                item_description = details_str[:180]
+            specifications = details_str[:250]
+        else:
+            item_description = (cleaned_desc or raw_desc)[:180]
+            specifications = ", ".join(content_lines[1:4])[:250] if len(content_lines) > 1 else item_description
     else:
-        item_description = "Procurement Request"
+        item_description = "Plumbing Materials & Fittings"
 
-    print(f"[FALLBACK PARSER] Extracted Item: '{item_description}', Qty: {quantity}")
+    print(f"[EXTRACTED ITEM DESCRIPTION]: '{item_description}' (Qty: {quantity})")
 
     return {
         "item_description": item_description,

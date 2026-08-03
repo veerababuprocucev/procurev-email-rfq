@@ -331,8 +331,7 @@ def process_emails():
                             rfq_documents.append(
                                 {
                                     "fileName": filename,
-                                    "file": file_content,
-                                    "fileContent": file_content
+                                    "file": file_content
                                 }
                             )
                             print(f"Attachment Processed Successfully: {filename} ({file_size} bytes, b64_len={len(file_content)})")

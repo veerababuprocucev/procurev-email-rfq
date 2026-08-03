@@ -20,15 +20,14 @@ NUMBER_WORDS = {
 }
 
 PRODUCT_PATTERNS = [
-    r'supply\s+of\s+(.+?)(?=\s+required|\s+needed|\.|,|$)',
-    r'procurement\s+of\s+(.+?)(?=\.|,|$)',
-    r'purchase\s+of\s+(.+?)(?=\.|,|$)',
-    r'quotation\s+for\s+(.+?)(?=\.|,|$)',
-    r'please\s+quote\s+for\s+(.+?)(?=\.|,|$)',
-    r'requirement\s+(?:of|for)\s+(.+?)(?=\.|,|$)',
-    r'looking\s+for\s+(.+?)(?=\.|,|$)',
-    r'need\s+\d*\s*(.+?)(?=\.|,|$)',
-    r'item\s*name\s*[:=\-]?\s*(.+?)(?=\n|,|$)'
+    r'supply\s+of\s+(.+?)(?=\s+required|\s+needed|\s+for\s+our|\n|$)',
+    r'procurement\s+of\s+(.+?)(?=\n|$)',
+    r'purchase\s+of\s+(.+?)(?=\n|$)',
+    r'quotation\s+for\s+(.+?)(?=\n|$)',
+    r'please\s+quote\s+for\s+(.+?)(?=\n|$)',
+    r'looking\s+for\s+(.+?)(?=\n|$)',
+    r'need\s+\d*\s*(.+?)(?=\n|$)',
+    r'item\s*name\s*[:=\-]?\s*(.+)'
 ]
 
 SPEC_PATTERNS = [
@@ -50,6 +49,9 @@ UOM_REGEX = r'\b(nos|pcs|kg|boxes?|packs?|each|ea|lot|lumpsum|sets?|pair|coil|ro
 
 
 def normalize_date(date_str):
+    """
+    Formats dates into strict DD-Mon-YYYY format (e.g. 10-Aug-2026)
+    """
     if not date_str or not str(date_str).strip():
         return ""
     raw = str(date_str).strip()
@@ -58,13 +60,13 @@ def normalize_date(date_str):
     raw = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', raw, flags=re.IGNORECASE)
 
     formats = [
-        "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d",
-        "%d-%b-%Y", "%d-%B-%Y", "%d %B %Y", "%d %b %Y", "%d.%m.%Y",
+        "%d-%b-%Y", "%d-%B-%Y", "%d %B %Y", "%d %b %Y",
+        "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%d.%m.%Y",
         "%B %d %Y", "%b %d %Y", "%B %d, %Y", "%b %d, %Y", "%Y %b %d", "%Y %B %d"
     ]
     for fmt in formats:
         try:
-            return datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
+            return datetime.strptime(raw, fmt).strftime("%d-%b-%Y")
         except ValueError:
             pass
 
@@ -73,7 +75,7 @@ def normalize_date(date_str):
     if m:
         try:
             date_raw = f"{m.group(1)} {m.group(2)} {m.group(3)}"
-            return datetime.strptime(date_raw, "%d %b %Y").strftime("%Y-%m-%d")
+            return datetime.strptime(date_raw, "%d %b %Y").strftime("%d-%b-%Y")
         except Exception:
             pass
 
@@ -81,7 +83,7 @@ def normalize_date(date_str):
     if m2:
         try:
             date_raw = f"{m2.group(2)} {m2.group(1)} {m2.group(3)}"
-            return datetime.strptime(date_raw, "%d %b %Y").strftime("%Y-%m-%d")
+            return datetime.strptime(date_raw, "%d %b %Y").strftime("%d-%b-%Y")
         except Exception:
             pass
 
@@ -162,7 +164,7 @@ def validate_and_normalize_rfq(rfq_data, email_text):
 
     rfq_data["quantity"] = quantity
 
-    # 3. UOM VALIDATION (Extended Vocabulary: Nos, Pcs, Kg, Boxes, Each, EA, Lot, Lumpsum, Set, Pair, etc.)
+    # 3. UOM VALIDATION (Extended Vocabulary)
     if not rfq_data.get("uom") or rfq_data["uom"].lower() in ["", "none", "null"]:
         uom_m = re.search(UOM_REGEX, email_text, re.IGNORECASE)
         if uom_m:
@@ -170,9 +172,9 @@ def validate_and_normalize_rfq(rfq_data, email_text):
         else:
             rfq_data["uom"] = "Nos"
 
-    # 4. BRAND VALIDATION ("Any", "No Specific", "Open", "Equivalent", "OEM", "Preferred Make")
+    # 4. BRAND VALIDATION ("Any", "No Specific", "Open", "Equivalent" brand support)
     brand = str(rfq_data.get("brand") or "").strip()
-    if re.search(r'\b(any|no\s+specific|open|equivalent|oem|preferred|make|manufacturer)\s+brand\b|\b(any\s+make|open\s+make|oem\s+make)\b', email_text, re.IGNORECASE):
+    if re.search(r'\b(any|equivalent|open|no\s+specific)\s+(brand|make)\b', email_text, re.IGNORECASE):
         brand = "Any"
     elif not brand or brand.lower() in ["we look forward to your quotation", "not specified", "none"]:
         for b in COMMON_BRANDS:
@@ -181,7 +183,7 @@ def validate_and_normalize_rfq(rfq_data, email_text):
                 break
     rfq_data["brand"] = brand or "Not Specified"
 
-    # 5. FULL PHRASE SPECIFICATIONS EXTRACTION (Includes 30-40 PPM Range)
+    # 5. FULL PHRASE SPECIFICATIONS EXTRACTION
     specs_list = []
     for sp in SPEC_PATTERNS:
         m = re.search(sp, email_text, re.IGNORECASE)
@@ -193,7 +195,7 @@ def validate_and_normalize_rfq(rfq_data, email_text):
     elif not rfq_data.get("specifications"):
         rfq_data["specifications"] = f"{rfq_data['item_description']}" + (f", Brand: {brand}" if brand else "")
 
-    # 6. DELIVERY DATE NORMALIZATION (ISO YYYY-MM-DD + Ordinal + Multi-Format Support)
+    # 6. DELIVERY DATE NORMALIZATION (DD-Mon-YYYY format)
     delivery_date = str(rfq_data.get("delivery_date") or "").strip()
     if not delivery_date:
         date_match = re.search(r'\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}|\d{4}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})\b', email_text, re.IGNORECASE)
@@ -202,11 +204,15 @@ def validate_and_normalize_rfq(rfq_data, email_text):
 
     rfq_data["delivery_date"] = normalize_date(delivery_date)
 
-    # 7. DELIVERY LOCATION EXTRACTION (Delivery Location, Delivery Address, Ship To, Destination, Site)
-    if not rfq_data.get("delivery_city"):
-        loc_match = re.search(r'(?:delivery\s+location|delivery\s+address|delivery\s+site|ship\s+to|destination|location|site)\s*[:=\-]\s*([A-Za-z0-9\s,\.\-]+?)(?=[,\;\n]|\s*(?:pincode|qty|brand|date)|$)', email_text, re.IGNORECASE)
-        if loc_match:
-            rfq_data["delivery_city"] = loc_match.group(1).strip()
+    # 7. DELIVERY LOCATION & PINCODE EXTRACTION
+    loc = re.search(r'(?:delivery\s+location|delivery\s+address|delivery\s+site|ship\s+to|destination)\s*[:=\-]\s*([A-Za-z0-9\s,\-]+?)(?=[,\;\n\.]|\s*(?:specs|specifications|quantity|qty|brand|date)|$)', email_text, re.IGNORECASE)
+    if loc:
+        location_raw = loc.group(1).strip()
+        pin = re.search(r'\b\d{6}\b', location_raw)
+        if pin:
+            rfq_data["delivery_pincode"] = pin.group()
+        city = re.sub(r'\b\d{6}\b', '', location_raw).strip(" ,.")
+        rfq_data["delivery_city"] = city
 
     return rfq_data
 

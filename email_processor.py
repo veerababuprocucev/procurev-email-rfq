@@ -13,29 +13,24 @@ from services.email_sender import (
 def parse_delivery_date(raw_date_str):
     """
     Parses any delivery date format (e.g. 10-08-2026, 10/08/2026, 2026-08-10, 10 August 2026)
-    into ISO YYYY-MM-DD format. Defaults to +5 days if missing or invalid.
+    into DD-Mon-YYYY format (e.g. 10-Aug-2026). Defaults to +5 days if missing or invalid.
     """
     if not raw_date_str or not str(raw_date_str).strip():
-        return (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
+        return (datetime.now() + timedelta(days=5)).strftime("%d-%b-%Y")
 
     raw_str = str(raw_date_str).strip()
+    raw_str = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', raw_str, flags=re.IGNORECASE)
 
     date_formats = [
-        "%Y-%m-%d",
-        "%d-%m-%Y",
-        "%d/%m/%Y",
-        "%Y/%m/%d",
-        "%d-%b-%Y",
-        "%d-%B-%Y",
-        "%d %B %Y",
-        "%d %b %Y",
-        "%d.%m.%Y"
+        "%d-%b-%Y", "%d-%B-%Y", "%d %B %Y", "%d %b %Y",
+        "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%d.%m.%Y",
+        "%B %d %Y", "%b %d %Y", "%B %d, %Y", "%b %d, %Y"
     ]
 
     for fmt in date_formats:
         try:
             parsed = datetime.strptime(raw_str, fmt)
-            return parsed.strftime("%Y-%m-%d")
+            return parsed.strftime("%d-%b-%Y")
         except ValueError:
             pass
 
@@ -45,7 +40,7 @@ def parse_delivery_date(raw_date_str):
         try:
             day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
             parsed = datetime(year, month, day)
-            return parsed.strftime("%Y-%m-%d")
+            return parsed.strftime("%d-%b-%Y")
         except Exception:
             pass
 
@@ -54,11 +49,11 @@ def parse_delivery_date(raw_date_str):
         try:
             year, month, day = int(m2.group(1)), int(m2.group(2)), int(m2.group(3))
             parsed = datetime(year, month, day)
-            return parsed.strftime("%Y-%m-%d")
+            return parsed.strftime("%d-%b-%Y")
         except Exception:
             pass
 
-    return (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
+    return (datetime.now() + timedelta(days=5)).strftime("%d-%b-%Y")
 
 
 # ============================================

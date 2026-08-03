@@ -20,15 +20,13 @@ NUMBER_WORDS = {
 }
 
 PRODUCT_PATTERNS = [
-    r'(?:supply\s+of)\s+(.+?)\s+(?:required|needed|for)',
-    r'(?:procurement\s+of)\s+(.+?)\s+(?:required|needed|for)',
-    r'(?:purchase\s+of)\s+(.+?)\s+(?:required|needed|for)',
-    r'(?:requirement\s+(?:for|of))\s+(.+?)(?:\.|\,|\n|$)',
-    r'(?:need)\s+\d*\s*(.+?)(?:\.|\,|\n|$)',
-    r'(?:looking\s+for)\s+(.+?)(?:\.|\,|\n|$)',
-    r'(?:please\s+quote\s+for)\s+(.+?)(?:\.|\,|\n|$)',
-    r'(?:request\s+(?:you\s+)?to\s+submit\s+(?:your\s+)?quotation\s+for\s+(?:the\s+)?supply\s+of)\s+(.+?)(?:\s+required|\.|\,|\n|$)',
-    r'(?:item\s*name|product\s*name|item|product)\s*[:=\-]?\s*([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[,\;\n]|\s*(?:quantity|qty|brand|uom)|$)'
+    r'\b(?:subject|re|rfq|enquiry|tender|quotation)\s*[:=\-]\s*([A-Za-z0-9\s\-\/\(\)]+?)(?=[,\;\n\.]|\s*(?:quantity|qty|brand|delivery)|$)',
+    r'\b(?:rfq|enquiry|tender|quotation|quote|rate)\s+(?:for|of)\s+(?:the\s+)?(?:supply\s+of\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project|[,\;\n\.]|$)|\s*$)',
+    r'\b(?:supply\s+of|procurement\s+of|purchase\s+of|requirement\s+(?:of|for))\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project|[,\;\n\.]|$)|\s*$)',
+    r'\b(?:submit\s+(?:your\s+)?quotation\s+for\s+(?:the\s+)?(?:supply\s+of\s+)?)\s*([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project|[,\;\n\.]|$)|\s*$)',
+    r'\b(?:item\s*name|product\s*name|item|product)\s*[:=\-]?\s*([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[,\;\n]|\s*(?:quantity|qty|brand|uom)|$)',
+    r'\b(?:need|looking\s+for|require)\s+(?:\d+\s+)?(?:nos|pcs|units|items)?\s*(?:of\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:for|delivery|pincode|qty|brand|location|[,\;\n\.]|$)|\s*$)',
+    r'^([A-Za-z0-9\s\-\/\(\)]+?)\s+(?:required|needed|for\s+our\s+organization|for\s+our\s+company)'
 ]
 
 SPEC_PATTERNS = [

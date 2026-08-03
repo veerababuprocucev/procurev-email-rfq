@@ -52,18 +52,15 @@ Email Content:
                     "temperature": 0.0
                 }
             },
-            timeout=300
+            timeout=10
         )
-    except requests.exceptions.ConnectionError as e:
-        raise Exception(
-            "Could not connect to Ollama server at http://localhost:11434. "
-            "Please ensure Ollama is running (`ollama serve`)."
-        ) from e
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"Ollama request failed: {e}") from e
+    except Exception as e:
+        print(f"\n[WARNING] Ollama server unavailable ({e}). Switching to rule-based fallback extraction...")
+        return fallback_extract_rfq(email_text)
 
     if response.status_code != 200:
-        raise Exception(f"Ollama HTTP {response.status_code}: {response.text}")
+        print(f"\n[WARNING] Ollama HTTP {response.status_code}. Switching to rule-based fallback extraction...")
+        return fallback_extract_rfq(email_text)
 
     response_json = response.json()
 
@@ -133,6 +130,73 @@ Email Content:
         )
 
     return rfq_data
+
+
+def fallback_extract_rfq(email_text):
+    """
+    Fallback extractor when Ollama AI server is offline or unavailable.
+    Uses smart regex patterns to extract quantity, item description, and specs.
+    """
+    if not email_text:
+        email_text = ""
+
+    lines = [line.strip() for line in email_text.splitlines() if line.strip()]
+
+    item_description = ""
+    quantity = 0
+    uom = "Nos"
+    brand = ""
+    delivery_date = ""
+    delivery_city = ""
+    delivery_state = ""
+    delivery_pincode = ""
+    specifications = ""
+
+    # Extract quantity
+    qty_match = re.search(r'\b(\d+)\s*(nos|pcs|units|items|laptops|qty)?\b', email_text, re.IGNORECASE)
+    if qty_match:
+        try:
+            quantity = int(qty_match.group(1))
+            if qty_match.group(2):
+                uom = qty_match.group(2).capitalize()
+        except Exception:
+            quantity = 1
+    else:
+        quantity = 1
+
+    # Extract 6-digit Indian pincode if present
+    pincode_match = re.search(r'\b[1-9]\d{5}\b', email_text)
+    if pincode_match:
+        delivery_pincode = pincode_match.group(0)
+
+    # Extract item description from non-greeting content lines
+    ignore_words = ["hi", "hello", "dear", "thanks", "regards", "subject:", "team", "from:"]
+    desc_lines = []
+    for line in lines:
+        if not any(line.lower().startswith(w) for w in ignore_words):
+            desc_lines.append(line)
+
+    if desc_lines:
+        item_description = desc_lines[0][:150]
+        if len(desc_lines) > 1:
+            specifications = ", ".join(desc_lines[1:4])[:200]
+    else:
+        item_description = "Procurement Request"
+
+    print(f"[FALLBACK PARSER] Extracted Item: '{item_description}', Qty: {quantity}")
+
+    return {
+        "item_description": item_description,
+        "specifications": specifications or item_description,
+        "quantity": quantity,
+        "uom": uom,
+        "brand": brand,
+        "delivery_date": delivery_date,
+        "delivery_city": delivery_city,
+        "delivery_state": delivery_state,
+        "delivery_pincode": delivery_pincode,
+        "delivery_location": ""
+    }
 
 
 # TEST ONLY

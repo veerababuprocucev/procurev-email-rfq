@@ -205,20 +205,15 @@ def process_emails():
         # Delivery Location Handling
         # -----------------------------
 
-        delivery_city = (
-            rfq_data.get("delivery_city", "")
-            .strip()
-                )
+        delivery_city = rfq_data.get("delivery_city", "").strip()
+        delivery_state = rfq_data.get("delivery_state", "").strip()
+        delivery_pincode = rfq_data.get("delivery_pincode", "").strip()
 
-        delivery_state = (
-            rfq_data.get("delivery_state", "")
-            .strip()
-        )
-
-        delivery_pincode = (
-            rfq_data.get("delivery_pincode", "")
-            .strip()
-        )
+        # Default Buyer Registered Location Fallback if buyer didn't specify location in email
+        if not delivery_city and not delivery_pincode and isinstance(buyer, dict):
+            delivery_city = str(buyer.get("city") or buyer.get("location") or "").strip()
+            delivery_state = str(buyer.get("state") or "").strip()
+            delivery_pincode = str(buyer.get("pincode") or buyer.get("pin") or "").strip()
 
         # -----------------------------
         # Brand Handling

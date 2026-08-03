@@ -1,6 +1,6 @@
 """
 Enterprise RFQ Extraction Engine - Production Grade Pipeline
-Architecture: Few-Shot LLM (Ollama) -> Validation -> Priority Regex -> Domain Dictionary -> ISO Normalization
+Architecture: Few-Shot LLM (Ollama) -> Validation -> Priority Regex -> Domain Dictionary -> ISO Normalization -> Pincode Lookup
 Author: Senior AI Engineer
 """
 
@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 # ---------------------------------------------------------------------------
-# Domain Product Dictionaries & Brand Registries for High-Precision Matching
+# Domain Product Dictionaries, Pincode Maps & Brand Registries
 # ---------------------------------------------------------------------------
 
 COMMON_BRANDS: List[str] = [
@@ -27,6 +27,30 @@ NUMBER_WORDS: Dict[str, int] = {
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
     "eleven": 11, "twelve": 12, "fifteen": 15, "twenty": 20,
     "fifty": 50, "hundred": 100
+}
+
+PINCODE_PREFIX_MAP: Dict[str, tuple] = {
+    "560": ("Bangalore", "Karnataka"), "561": ("Bangalore Rural", "Karnataka"),
+    "562": ("Bangalore Rural", "Karnataka"), "570": ("Mysore", "Karnataka"),
+    "580": ("Hubli", "Karnataka"), "575": ("Mangalore", "Karnataka"),
+    "522": ("Guntur", "Andhra Pradesh"), "530": ("Visakhapatnam", "Andhra Pradesh"),
+    "520": ("Vijayawada", "Andhra Pradesh"), "517": ("Tirupati", "Andhra Pradesh"),
+    "500": ("Hyderabad", "Telangana"), "501": ("Hyderabad", "Telangana"),
+    "600": ("Chennai", "Tamil Nadu"), "641": ("Coimbatore", "Tamil Nadu"),
+    "625": ("Madurai", "Tamil Nadu"), "620": ("Tiruchirappalli", "Tamil Nadu"),
+    "400": ("Mumbai", "Maharashtra"), "411": ("Pune", "Maharashtra"),
+    "440": ("Nagpur", "Maharashtra"), "422": ("Nashik", "Maharashtra"),
+    "110": ("New Delhi", "Delhi"), "122": ("Gurugram", "Haryana"),
+    "201": ("Noida", "Uttar Pradesh"), "226": ("Lucknow", "Uttar Pradesh"),
+    "208": ("Kanpur", "Uttar Pradesh"), "380": ("Ahmedabad", "Gujarat"),
+    "390": ("Vadodara", "Gujarat"), "395": ("Surat", "Gujarat"),
+    "302": ("Jaipur", "Rajasthan"), "700": ("Kolkata", "West Bengal"),
+    "751": ("Bhubaneswar", "Odisha"), "781": ("Guwahati", "Assam"),
+    "800": ("Patna", "Bihar"), "834": ("Ranchi", "Jharkhand"),
+    "492": ("Raipur", "Chhattisgarh"), "462": ("Bhopal", "Madhya Pradesh"),
+    "452": ("Indore", "Madhya Pradesh"), "682": ("Kochi", "Kerala"),
+    "695": ("Trivandrum", "Kerala"), "248": ("Dehradun", "Uttarakhand"),
+    "160": ("Chandigarh", "Punjab/Haryana")
 }
 
 # Domain Category Product Dictionary for Industrial & Enterprise Procurement
@@ -78,7 +102,7 @@ UOM_REGEX: str = r'\b(nos|pcs|kg|boxes?|packs?|bags?|each|ea|lot|lumpsum|sets?|p
 
 
 # ---------------------------------------------------------------------------
-# Helper Functions: Validation, Normalization, Clean-up
+# Helper Functions: Validation, Normalization, Clean-up, Pincode Lookup
 # ---------------------------------------------------------------------------
 
 def is_generic_description(desc_str: Optional[str]) -> bool:
@@ -155,6 +179,18 @@ def normalize_date(date_str: Optional[str]) -> str:
             pass
 
     return raw
+
+
+def lookup_pincode_location(pincode_str: Optional[str]) -> tuple:
+    """
+    Looks up City and State from 6-digit Indian Pincode prefix.
+    Returns (City, State) tuple.
+    """
+    if not pincode_str or len(str(pincode_str).strip()) != 6:
+        return "", ""
+    pin = str(pincode_str).strip()
+    prefix = pin[:3]
+    return PINCODE_PREFIX_MAP.get(prefix, ("", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -285,8 +321,8 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
 
     rfq_data["delivery_date"] = normalize_date(delivery_date)
 
-    # 7. DELIVERY LOCATION, STATE & PINCODE EXTRACTION
-    loc = re.search(r'(?:delivery\s+location|delivery\s+address|delivery\s+site|ship\s+to|destination|location|site)\s*[:=\-]\s*([^\n]+?)(?=\s*(?:specs|specifications|quantity|qty|brand|date|\n)|$)', email_text, re.IGNORECASE)
+    # 7. DELIVERY LOCATION, STATE & PINCODE EXTRACTION WITH AUTOMATIC PINCODE LOOKUP
+    loc = re.search(r'(?:delivery\s+location|delivery\s+address|delivery\s+site|ship\s+to|destination|location|site|pincode|pin)\s*[:=\-]\s*([^\n]+?)(?=\s*(?:specs|specifications|quantity|qty|brand|date|\n)|$)', email_text, re.IGNORECASE)
     if loc:
         location_raw = loc.group(1).strip()
         pin = re.search(r'\b\d{6}\b', location_raw)
@@ -299,6 +335,20 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
             rfq_data["delivery_city"] = parts[0]
             if len(parts) > 1 and not rfq_data.get("delivery_state"):
                 rfq_data["delivery_state"] = parts[1]
+
+    # Standalone Pincode Detection if pincode missing
+    if not rfq_data.get("delivery_pincode"):
+        pin_standalone = re.search(r'\b[1-9]\d{5}\b', email_text)
+        if pin_standalone:
+            rfq_data["delivery_pincode"] = pin_standalone.group(0)
+
+    # Automatic City & State Lookup from Pincode if city missing
+    if rfq_data.get("delivery_pincode") and not rfq_data.get("delivery_city"):
+        city_lookup, state_lookup = lookup_pincode_location(rfq_data["delivery_pincode"])
+        if city_lookup:
+            rfq_data["delivery_city"] = city_lookup
+        if state_lookup and not rfq_data.get("delivery_state"):
+            rfq_data["delivery_state"] = state_lookup
 
     return rfq_data
 

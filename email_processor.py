@@ -10,6 +10,57 @@ from services.email_sender import (
     send_registration_email
 )
 
+def parse_delivery_date(raw_date_str):
+    """
+    Parses any delivery date format (e.g. 10-08-2026, 10/08/2026, 2026-08-10, 10 August 2026)
+    into ISO YYYY-MM-DD format. Defaults to +5 days if missing or invalid.
+    """
+    if not raw_date_str or not str(raw_date_str).strip():
+        return (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
+
+    raw_str = str(raw_date_str).strip()
+
+    date_formats = [
+        "%Y-%m-%d",
+        "%d-%m-%Y",
+        "%d/%m/%Y",
+        "%Y/%m/%d",
+        "%d-%b-%Y",
+        "%d-%B-%Y",
+        "%d %B %Y",
+        "%d %b %Y",
+        "%d.%m.%Y"
+    ]
+
+    for fmt in date_formats:
+        try:
+            parsed = datetime.strptime(raw_str, fmt)
+            return parsed.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    # Regex fallback for DD-MM-YYYY or DD/MM/YYYY
+    m = re.search(r'(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})', raw_str)
+    if m:
+        try:
+            day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            parsed = datetime(year, month, day)
+            return parsed.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
+    m2 = re.search(r'(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})', raw_str)
+    if m2:
+        try:
+            year, month, day = int(m2.group(1)), int(m2.group(2)), int(m2.group(3))
+            parsed = datetime(year, month, day)
+            return parsed.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
+    return (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
+
+
 # ============================================
 # Email Processing Function
 # ============================================
@@ -152,63 +203,8 @@ def process_emails():
         # Delivery Date Handling
         # -----------------------------
 
-        delivery_date = (
-            rfq_data["delivery_date"]
-        )
-
-        if delivery_date == "":
-
-            delivery_date = (
-                datetime.now()
-                + timedelta(days=5)
-            ).strftime("%Y-%m-%d")
-
-        else:
-
-            try:
-
-                delivery_date = (
-                    datetime.strptime(
-                        delivery_date,
-                        "%Y-%m-%d"
-                    )
-                    .strftime("%Y-%m-%d")
-                )
-
-            except Exception:
-
-                try:
-
-                    delivery_date = (
-                        datetime.strptime(
-                            delivery_date,
-                            "%d %B %Y"
-                        )
-                        .strftime("%Y-%m-%d")
-                    )
-
-                except Exception:
-
-                    try:
-
-                        delivery_date = (
-                            datetime.strptime(
-                                delivery_date,
-                                "%d/%m/%Y"
-                            )
-                            .strftime("%Y-%m-%d")
-                        )
-
-                    except Exception:
-
-                        print(
-                            f"Invalid date format: {delivery_date}"
-                        )
-
-                        delivery_date = (
-                            datetime.now()
-                            + timedelta(days=5)
-                        ).strftime("%Y-%m-%d")
+        raw_delivery_date = rfq_data.get("delivery_date", "")
+        delivery_date = parse_delivery_date(raw_delivery_date)
 
         # -----------------------------
         # Delivery Location Handling

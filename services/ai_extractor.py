@@ -303,12 +303,17 @@ def fallback_extract_rfq(email_text):
     else:
         specifications = f"{item_description}" + (f", Brand: {brand}" if brand else "")
 
+    # 5. DELIVERY DATE EXTRACTION (e.g. 10-08-2026, 10/08/2026, 2026-08-10, 10 August 2026)
+    date_match = re.search(r'\b(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})\b', email_text, re.IGNORECASE)
+    if date_match:
+        delivery_date = date_match.group(1).strip()
+
     # Extract 6-digit Indian pincode if present
     pincode_match = re.search(r'\b[1-9]\d{5}\b', email_text)
     if pincode_match:
         delivery_pincode = pincode_match.group(0)
 
-    print(f"[EXTRACTED ITEM]: '{item_description}' | Qty: {quantity} {uom} | Brand: '{brand}'")
+    print(f"[EXTRACTED ITEM]: '{item_description}' | Qty: {quantity} {uom} | Brand: '{brand}' | Date: '{delivery_date}'")
 
     return {
         "item_description": item_description,

@@ -50,7 +50,7 @@ UOM_REGEX = r'\b(nos|pcs|kg|boxes?|packs?|each|ea|lot|lumpsum|sets?|pair|coil|ro
 
 def normalize_date(date_str):
     """
-    Formats dates into strict DD-Mon-YYYY format (e.g. 10-Aug-2026)
+    Formats dates into ISO YYYY-MM-DD format (e.g. 2026-08-10) required by backend API.
     """
     if not date_str or not str(date_str).strip():
         return ""
@@ -60,13 +60,13 @@ def normalize_date(date_str):
     raw = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', raw, flags=re.IGNORECASE)
 
     formats = [
-        "%d-%b-%Y", "%d-%B-%Y", "%d %B %Y", "%d %b %Y",
-        "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%d.%m.%Y",
+        "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d",
+        "%d-%b-%Y", "%d-%B-%Y", "%d %B %Y", "%d %b %Y", "%d.%m.%Y",
         "%B %d %Y", "%b %d %Y", "%B %d, %Y", "%b %d, %Y", "%Y %b %d", "%Y %B %d"
     ]
     for fmt in formats:
         try:
-            return datetime.strptime(raw, fmt).strftime("%d-%b-%Y")
+            return datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
         except ValueError:
             pass
 
@@ -75,7 +75,7 @@ def normalize_date(date_str):
     if m:
         try:
             date_raw = f"{m.group(1)} {m.group(2)} {m.group(3)}"
-            return datetime.strptime(date_raw, "%d %b %Y").strftime("%d-%b-%Y")
+            return datetime.strptime(date_raw, "%d %b %Y").strftime("%Y-%m-%d")
         except Exception:
             pass
 
@@ -83,7 +83,7 @@ def normalize_date(date_str):
     if m2:
         try:
             date_raw = f"{m2.group(2)} {m2.group(1)} {m2.group(3)}"
-            return datetime.strptime(date_raw, "%d %b %Y").strftime("%d-%b-%Y")
+            return datetime.strptime(date_raw, "%d %b %Y").strftime("%Y-%m-%d")
         except Exception:
             pass
 

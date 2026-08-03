@@ -20,13 +20,10 @@ NUMBER_WORDS = {
 }
 
 PRODUCT_PATTERNS = [
-    r'\b(?:subject|re|rfq|enquiry|tender|quotation)\s*[:=\-]\s*([A-Za-z0-9\s\-\/\(\)]+?)(?=[,\;\n\.]|\s*(?:quantity|qty|brand|delivery)|$)',
-    r'\b(?:rfq|enquiry|tender|quotation|quote|rate)\s+(?:for|of)\s+(?:the\s+)?(?:supply\s+of\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project|[,\;\n\.]|$)|\s*$)',
-    r'\b(?:supply\s+of|procurement\s+of|purchase\s+of|requirement\s+(?:of|for))\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project|[,\;\n\.]|$)|\s*$)',
-    r'\b(?:submit\s+(?:your\s+)?quotation\s+for\s+(?:the\s+)?(?:supply\s+of\s+)?)\s*([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project|[,\;\n\.]|$)|\s*$)',
-    r'\b(?:item\s*name|product\s*name|item|product)\s*[:=\-]?\s*([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[,\;\n]|\s*(?:quantity|qty|brand|uom)|$)',
-    r'\b(?:need|looking\s+for|require)\s+(?:\d+\s+)?(?:nos|pcs|units|items)?\s*(?:of\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:for|delivery|pincode|qty|brand|location|[,\;\n\.]|$)|\s*$)',
-    r'^([A-Za-z0-9\s\-\/\(\)]+?)\s+(?:required|needed|for\s+our\s+organization|for\s+our\s+company)'
+    r'supply\s+of\s+(.+?)(?=\s+required|\s+needed|\.|,|$)',
+    r'requirement\s+(?:of|for)\s+(.+?)(?=\.|,|$)',
+    r'need\s+\d*\s*(.+?)(?=\.|,|$)',
+    r'item\s*name\s*[:=\-]?\s*(.+?)(?=\n|,|$)'
 ]
 
 SPEC_PATTERNS = [
@@ -34,7 +31,7 @@ SPEC_PATTERNS = [
     r'Print[,\s]+Scan[,\s]+Copy',
     r'Automatic\s+Duplex\s+Printing',
     r'Network\s+Connectivity',
-    r'\d+(?:\-\d+)?\s*PPM',
+    r'\d+\s*-\s*\d+\s*PPM|\d+\s*PPM',
     r'Warranty\s+Details',
     r'Installation\s+Support',
     r'Cartridge\s+Yield',
@@ -49,6 +46,9 @@ def normalize_date(date_str):
     if not date_str or not str(date_str).strip():
         return ""
     raw = str(date_str).strip()
+
+    # Strip ordinal suffixes (10th -> 10, 1st -> 1, 2nd -> 2, 3rd -> 3)
+    raw = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', raw, flags=re.IGNORECASE)
 
     formats = [
         "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d",
@@ -79,20 +79,10 @@ def validate_and_normalize_rfq(rfq_data, email_text):
     if not isinstance(rfq_data, dict):
         rfq_data = {}
 
-    # 1. ITEM DESCRIPTION VALIDATION (Word Count & Regex Pattern Registry)
+    # 1. ITEM DESCRIPTION VALIDATION (Word Count & Length Validation)
     desc = str(rfq_data.get("item_description") or "").strip()
 
-    # If single word (e.g. "Office") or empty/generic, validate and expand via PRODUCT_PATTERNS
-    if len(desc.split()) <= 1 or desc.lower() in ["office", "item", "product", "procurement"]:
-        for p in PRODUCT_PATTERNS:
-            m = re.search(p, email_text, re.IGNORECASE)
-            if m:
-                extracted = m.group(1).strip()
-                if len(extracted.split()) >= 1 and extracted.lower() not in ["office", "item"]:
-                    desc = extracted
-                    break
-
-    # Clean lead filler phrases and prefixes
+    # Clean lead filler phrases
     desc = re.sub(
         r'^(we\s+request\s+you\s+to\s+submit\s+your\s+quotation\s+for\s+the\s+supply\s+of|please\s+provide\s+quotation\s+for\s+)?(the\s+following\s+items?\.?\s*\(?|we\s+have\s+(a\s+)?requirement\s+(of|for)|requirement\s+(of|for)|(please\s+)?(provide|send)\s+(a\s+)?(quote|quotation|rate)\s+(for|of)|rfq\s+(for|of)|enquiry\s+(for|of)|(we\s+)?need|(we\s+)?require)\s*:?\s*\(?',
         '', desc, flags=re.IGNORECASE
@@ -106,6 +96,23 @@ def validate_and_normalize_rfq(rfq_data, email_text):
 
     # Strip quantity suffixes like "- Ten Pcs", "- 100 Mtr", "- Twenty Boxes"
     desc = re.sub(r'[\-\:]?\s*(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred|\d+)\s*(?:nos|pcs|units?|items?|laptops?|sets?|mtr|meters?|kg|litres?|boxes?|packs?)\b.*$', '', desc, flags=re.IGNORECASE).strip()
+
+    # If desc is missing, < 2 words, < 10 chars, or generic word like "office", recover via PRODUCT_PATTERNS
+    if not desc or len(desc.split()) < 2 or len(desc) < 10 or desc.lower() in ["office", "item", "product", "procurement"]:
+        for p in PRODUCT_PATTERNS:
+            m = re.search(p, email_text, re.IGNORECASE)
+            if m:
+                extracted = m.group(1).strip()
+                extracted = re.sub(r'^(?:the\s+)?(?:supply\s+of\s+)?', '', extracted, flags=re.IGNORECASE).strip()
+                if extracted and len(extracted.split()) >= 1 and extracted.lower() not in ["office", "item"]:
+                    desc = extracted
+                    break
+
+    # Safe fallback check before defaulting
+    if not desc:
+        m_fall = re.search(r'supply\s+of\s+(.+?)(?=\s+required|\.)', email_text, re.IGNORECASE)
+        if m_fall:
+            desc = m_fall.group(1).strip()
 
     rfq_data["item_description"] = desc or "Procurement Request"
 
@@ -136,19 +143,18 @@ def validate_and_normalize_rfq(rfq_data, email_text):
 
     rfq_data["quantity"] = quantity
 
-    # 3. BRAND VALIDATION ("Any" brand support)
+    # 3. BRAND VALIDATION ("Any", "No Specific", "Open", "Equivalent" brand support)
     brand = str(rfq_data.get("brand") or "").strip()
-    if not brand or brand.lower() in ["we look forward to your quotation", "not specified", "none"]:
-        if re.search(r'\b(any\s+brand|no\s+specific\s+brand|open\s+to\s+any\s+brand)\b', email_text, re.IGNORECASE):
-            brand = "Any"
-        else:
-            for b in COMMON_BRANDS:
-                if re.search(rf"\b{re.escape(b)}\b", email_text, re.IGNORECASE):
-                    brand = b
-                    break
+    if re.search(r'\b(any|no\s+specific|open|equivalent)\s+brand\b', email_text, re.IGNORECASE):
+        brand = "Any"
+    elif not brand or brand.lower() in ["we look forward to your quotation", "not specified", "none"]:
+        for b in COMMON_BRANDS:
+            if re.search(rf"\b{re.escape(b)}\b", email_text, re.IGNORECASE):
+                brand = b
+                break
     rfq_data["brand"] = brand or "Not Specified"
 
-    # 4. FULL PHRASE SPECIFICATIONS EXTRACTION
+    # 4. FULL PHRASE SPECIFICATIONS EXTRACTION (Includes PPM Range e.g. 30-40 PPM)
     specs_list = []
     for sp in SPEC_PATTERNS:
         m = re.search(sp, email_text, re.IGNORECASE)
@@ -160,10 +166,10 @@ def validate_and_normalize_rfq(rfq_data, email_text):
     elif not rfq_data.get("specifications"):
         rfq_data["specifications"] = f"{rfq_data['item_description']}" + (f", Brand: {brand}" if brand else "")
 
-    # 5. DELIVERY DATE NORMALIZATION (ISO YYYY-MM-DD)
+    # 5. DELIVERY DATE NORMALIZATION (ISO YYYY-MM-DD + Ordinal Date Support e.g. 10th August 2026)
     delivery_date = str(rfq_data.get("delivery_date") or "").strip()
     if not delivery_date:
-        date_match = re.search(r'\b(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})\b', email_text, re.IGNORECASE)
+        date_match = re.search(r'\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})\b', email_text, re.IGNORECASE)
         if date_match:
             delivery_date = date_match.group(1).strip()
 
@@ -191,7 +197,7 @@ Extract exactly what appears in the email.
 Rules:
 1. Item Description must ONLY contain the actual product/material name.
 2. Quantity must ONLY be the requested item quantity as an integer. Convert word numbers ("Five" -> 5).
-3. Brand: Extract manufacturer (e.g. Dell, HP, Asian Paints). If email says "any brand", return "Any".
+3. Brand: Extract manufacturer (e.g. Dell, HP, Asian Paints). If email says "any brand", "no specific brand", "open brand", return "Any".
 4. UOM: Unit of measurement (e.g. Nos, Pcs, Kg, Mtr, Set, Box).
 5. Specifications: List key features, specs, model numbers, or requirements.
 
@@ -282,7 +288,7 @@ def fallback_extract_rfq(email_text):
 # TEST ONLY
 if __name__ == "__main__":
     sample = """
-    We request you to submit your quotation for the supply of Office Multifunction Laser Printers required for our organization. Five Nos. Any brand. Delivery Date: 10 August 2026. Specs: A4 Size, Print, Scan, Copy, Network Connectivity, Automatic Duplex Printing, 30-40 PPM, Warranty Details, Cartridge Yield, Installation Support.
+    We request you to submit your quotation for the supply of Office Multifunction Laser Printers required for our organization. Five Nos. Any brand. Delivery Date: 10th August 2026. Specs: A4 Size, Print, Scan, Copy, Network Connectivity, Automatic Duplex Printing, 30-40 PPM, Warranty Details, Cartridge Yield, Installation Support.
     """
 
     rfq_data = extract_rfq(sample)

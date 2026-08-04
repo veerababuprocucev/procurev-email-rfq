@@ -55,7 +55,8 @@ PINCODE_PREFIX_MAP: Dict[str, tuple] = {
 
 # Domain Category Product Dictionary for Industrial & Enterprise Procurement
 INDUSTRIAL_PRODUCT_DICTIONARY: List[str] = [
-    "IP CCTV Surveillance System", "CCTV Surveillance System", "Surveillance System",
+    "Industrial Personal Protective Equipment (PPE) Kits", "Personal Protective Equipment (PPE) Kits",
+    "PPE Kits", "IP CCTV Surveillance System", "CCTV Surveillance System", "Surveillance System",
     "IP Cameras", "NVR", "Multifunction Laser Printers", "Laser Printers", "Desktop Computers",
     "Latitude Laptops", "Laptops", "CPVC Pipes", "PVC Pipes", "GI Pipes",
     "HDPE Pipes", "SS 304 Pipes", "Copper Cables", "Armoured Cables",
@@ -95,13 +96,14 @@ SPEC_PATTERNS: List[str] = [
     r'NVR[^\.\,\n]*',
     r'Hard\s+Disk\s+Storage[^\.\,\n]*',
     r'Network\s+Accessories[^\.\,\n]*',
+    r'consisting\s+of[^\.\,\n]*',
     r'\d+\s*GB\s+(?:RAM|SSD|HDD)[^\.\,\n]*',
     r'Intel\s+i[3579]\s+(?:Processor)?[^\.\,\n]*',
     r'CPVC|PVC|PN10|PN16',
     r'Wi-Fi|Bluetooth|HDMI|Gigabit'
 ]
 
-UOM_REGEX: str = r'\b(nos|pcs|kg|boxes?|packs?|bags?|each|ea|lot|lumpsum|sets?|pair|coil|roll|bundle|sheet|tons?|mt|kl|ltr|litres?|sqft|sqm|cum|mtr|meters?|laptops?|printers?|units?|items?|cameras?)\b'
+UOM_REGEX: str = r'\b(nos|pcs|kg|boxes?|packs?|bags?|each|ea|lot|lumpsum|sets?|pair|coil|roll|bundle|sheet|tons?|mt|kl|ltr|litres?|sqft|sqm|cum|mtr|meters?|laptops?|printers?|units?|items?|cameras?|kits?)\b'
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +263,7 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
     # 2. QUANTITY VALIDATION (Explicit + Need Verb + Word Numbers + Unit Digits + Item Counts)
     explicit_qty = re.search(r'(?:quantity|qty|count)\s*[:=\-]?\s*(\d+)', email_text, re.IGNORECASE)
     need_qty = re.search(r'\b(?:need|require|looking\s+for|procure|purchase|want|supply\s+of|quotation\s+for|requirement\s+(?:for|of|is\s+for|includes))\s+(?:\d*\s+)?(\d{1,4})\b', email_text, re.IGNORECASE)
-    cam_qty = re.search(r'\b(\d{1,4})\s*(?:IP\s+Cameras|Cameras|nos|pcs|units|items)\b', email_text, re.IGNORECASE)
+    cam_qty = re.search(r'\b(\d{1,4})\s*(?:IP\s+Cameras|Cameras|PPE\s+kits?|kits?|nos|pcs|units|items)\b', email_text, re.IGNORECASE)
     qty_word = re.search(r'(?:qty|quantity|count)\s*[:=\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b', email_text, re.IGNORECASE)
     word_qty = re.search(r'\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b(?:\s*\(\d+\)\s*)?(?:\s*' + UOM_REGEX + ')?', email_text, re.IGNORECASE)
 
@@ -315,9 +317,9 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
 
     # 5. FULL PHRASE SPECIFICATIONS EXTRACTION (Includes Requirement Lists & Model Codes)
     specs_list = []
-    req_inc = re.search(r'\b(?:requirement\s+includes|includes|specifications?|features?)\s*[:=\-]?\s*([^\n\.]+?)(?=\s*(?:The\s+delivery|Kindly\s+include|[;\n\.]|\d{6})|$)', email_text, re.IGNORECASE)
+    req_inc = re.search(r'\b(?:requirement\s+includes|consisting\s+of|includes|specifications?|features?)\s*[:=\-]?\s*([^\n\.]+?)(?=\s*(?:The\s+material|The\s+delivery|Kindly\s+submit|[;\n\.]|\d{6})|$)', email_text, re.IGNORECASE)
     if req_inc:
-        specs_list.append(req_inc.group(1).strip())
+        specs_list.append(req_inc.group(0).strip())
 
     for sp in SPEC_PATTERNS:
         m = re.search(sp, email_text, re.IGNORECASE)
@@ -347,7 +349,7 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
     rfq_data["delivery_date"] = normalize_date(delivery_date)
 
     # 7. DELIVERY LOCATION, STATE & PINCODE EXTRACTION WITH AUTOMATIC PINCODE LOOKUP
-    loc = re.search(r'(?:delivery\s+location|delivery\s+address|delivery\s+site|ship\s+to|destination|location|site|pincode|pin)\s*(?:is|[:=\-])\s*([^\n\.]+?)(?=\s*(?:and\s+the|and|within|from|kindly|specs|specifications|quantity|qty|brand|date|\n)|$)', email_text, re.IGNORECASE)
+    loc = re.search(r'(?:delivery\s+location|delivery\s+address|delivery\s+site|material\s+is\s+required|required|delivered|ship\s+to|destination|location|site|pincode|pin)\s*(?:is|at|[:=\-])?\s*([A-Za-z\s\,]+?)(?=\s*(?:within|from|kindly|specs|specifications|quantity|qty|brand|date|\n)|$)', email_text, re.IGNORECASE)
     if loc:
         location_raw = loc.group(1).strip()
         pin = re.search(r'\b\d{6}\b', location_raw)

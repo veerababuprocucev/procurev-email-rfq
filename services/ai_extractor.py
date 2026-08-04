@@ -85,13 +85,10 @@ PRODUCT_PATTERNS: List[str] = [
 
 SPEC_PATTERNS: List[str] = [
     r'A[345]\s+Size[^\.\,\n]*',
-    r'Print[,\s]+Scan[,\s]+Copy[^\.\,\n]*',
-    r'Automatic\s+Duplex\s+Printing[^\.\,\n]*',
+    r'(?:Print|Scan|Copy)(?:[,\s/]+(?:and\s+)?(?:Print|Scan|Copy))+',
+    r'Automatic\s+Duplex\s+(?:Printing)?[^\.\,\n]*',
     r'Network\s+Connectivity[^\.\,\n]*',
-    r'\d+\s*-\s*\d+\s*PPM|\d+\s*PPM',
-    r'Warranty\s+Details[^\.\,\n]*',
-    r'Installation\s+Support[^\.\,\n]*',
-    r'Cartridge\s+Yield[^\.\,\n]*',
+    r'\d+\s*(?:–|-|\s*to\s*)\s*\d+\s*PPM|\b\d+\s*PPM',
     r'\d+\s*GB\s+(?:RAM|SSD|HDD)[^\.\,\n]*',
     r'Intel\s+i[3579]\s+(?:Processor)?[^\.\,\n]*',
     r'CPVC|PVC|PN10|PN16',
@@ -122,7 +119,9 @@ def is_generic_description(desc_str: Optional[str]) -> bool:
         "item description", "product description", "specification / make", "specification make",
         "description / specification", "item name", "product name", "item", "product", "particulars",
         "sl no", "s.no", "description", "specification", "make", "material", "general item",
-        "office", "printer", "laptop", "pipe", "cable", "paint"
+        "office", "printer", "laptop", "pipe", "cable", "paint",
+        "catalogue", "product catalogue", "technical datasheet", "datasheet", "commercial terms",
+        "installation support", "warranty details", "cartridge yield", "warranty", "terms"
     ]
     if clean in generic_exact:
         return True
@@ -130,7 +129,9 @@ def is_generic_description(desc_str: Optional[str]) -> bool:
     # Prefix/suffix match ONLY for explicit multi-word table headers & filler phrases
     generic_phrases = [
         "procurement request", "item description", "product description",
-        "description specification", "specification make", "description / specification"
+        "description specification", "specification make", "description / specification",
+        "product catalogue", "technical datasheet", "commercial terms", "installation support",
+        "warranty details", "cartridge yield"
     ]
     for g in generic_phrases:
         if clean == g or clean.startswith(g + " ") or clean.endswith(" " + g):
@@ -201,6 +202,8 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
     """
     Production validation pipeline: AI -> Validation -> Priority Regex -> Domain Dictionary -> Normalization -> Output
     """
+    from datetime import timedelta
+
     if not isinstance(rfq_data, dict):
         rfq_data = {}
 
@@ -250,9 +253,9 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
 
     # 2. QUANTITY VALIDATION (Explicit + Need Verb + Word Numbers + Unit Digits)
     explicit_qty = re.search(r'(?:quantity|qty|count)\s*[:=\-]?\s*(\d+)', email_text, re.IGNORECASE)
-    need_qty = re.search(r'\b(?:need|require|looking\s+for|procure|purchase|want|supply\s+of|quotation\s+for|requirement\s+(?:for|of))\s+(?:\d*\s+)?(\d{1,4})\b', email_text, re.IGNORECASE)
+    need_qty = re.search(r'\b(?:need|require|looking\s+for|procure|purchase|want|supply\s+of|quotation\s+for|requirement\s+(?:for|of|is\s+for))\s+(?:\d*\s+)?(\d{1,4})\b', email_text, re.IGNORECASE)
     qty_word = re.search(r'(?:qty|quantity|count)\s*[:=\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b', email_text, re.IGNORECASE)
-    word_qty = re.search(r'\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b(?:\s*' + UOM_REGEX + ')?', email_text, re.IGNORECASE)
+    word_qty = re.search(r'\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b(?:\s*\(\d+\)\s*)?(?:\s*' + UOM_REGEX + ')?', email_text, re.IGNORECASE)
 
     if explicit_qty:
         quantity = int(explicit_qty.group(1))
@@ -312,17 +315,22 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
     elif not rfq_data.get("specifications"):
         rfq_data["specifications"] = f"{rfq_data['item_description']}" + (f", Brand: {brand}" if brand else "")
 
-    # 6. DELIVERY DATE NORMALIZATION (ISO YYYY-MM-DD)
+    # 6. DELIVERY DATE NORMALIZATION (ISO YYYY-MM-DD with relative days calculation)
     delivery_date = str(rfq_data.get("delivery_date") or "").strip()
     if not delivery_date:
-        date_match = re.search(r'\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}|\d{4}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})\b', email_text, re.IGNORECASE)
-        if date_match:
-            delivery_date = date_match.group(1).strip()
+        rel_days = re.search(r'\b(?:within|in)\s+(\d{1,3})\s+days\b|\b(\d{1,3})\s+days\s+from\b', email_text, re.IGNORECASE)
+        if rel_days:
+            num_days = int(rel_days.group(1) or rel_days.group(2))
+            delivery_date = (datetime.now() + timedelta(days=num_days)).strftime("%Y-%m-%d")
+        else:
+            date_match = re.search(r'\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}|\d{4}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})\b', email_text, re.IGNORECASE)
+            if date_match:
+                delivery_date = date_match.group(1).strip()
 
     rfq_data["delivery_date"] = normalize_date(delivery_date)
 
     # 7. DELIVERY LOCATION, STATE & PINCODE EXTRACTION WITH AUTOMATIC PINCODE LOOKUP
-    loc = re.search(r'(?:delivery\s+location|delivery\s+address|delivery\s+site|ship\s+to|destination|location|site|pincode|pin)\s*[:=\-]\s*([^\n]+?)(?=\s*(?:specs|specifications|quantity|qty|brand|date|\n)|$)', email_text, re.IGNORECASE)
+    loc = re.search(r'(?:delivery\s+location|delivery\s+address|delivery\s+site|ship\s+to|destination|location|site|pincode|pin)\s*(?:is|[:=\-])\s*([^\n\.]+?)(?=\s*(?:and\s+the|and|within|from|kindly|specs|specifications|quantity|qty|brand|date|\n)|$)', email_text, re.IGNORECASE)
     if loc:
         location_raw = loc.group(1).strip()
         pin = re.search(r'\b\d{6}\b', location_raw)
@@ -330,6 +338,7 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
             rfq_data["delivery_pincode"] = pin.group()
 
         clean_loc = re.sub(r'\b\d{6}\b', '', location_raw).strip(" ,.")
+        clean_loc = re.sub(r'^(?:is|at)\s+', '', clean_loc, flags=re.IGNORECASE).strip()
         parts = [p.strip() for p in clean_loc.split(',') if p.strip()]
         if parts:
             rfq_data["delivery_city"] = parts[0]

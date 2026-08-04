@@ -5,8 +5,7 @@ from cron_job import execute_rfq_job
 
 app = func.FunctionApp()
 
-# Azure Timer Trigger Cron Format: "second minute hour day month day-of-week"
-# "0 */5 * * * *" = Trigger every 5 minutes automatically in Azure
+@app.function_name(name="rfq_email_processing_cron")
 @app.timer_trigger(
     schedule="0 */5 * * * *",
     arg_name="myTimer",

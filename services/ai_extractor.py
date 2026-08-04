@@ -55,7 +55,8 @@ PINCODE_PREFIX_MAP: Dict[str, tuple] = {
 
 # Domain Category Product Dictionary for Industrial & Enterprise Procurement
 INDUSTRIAL_PRODUCT_DICTIONARY: List[str] = [
-    "Multifunction Laser Printers", "Laser Printers", "Desktop Computers",
+    "IP CCTV Surveillance System", "CCTV Surveillance System", "Surveillance System",
+    "IP Cameras", "NVR", "Multifunction Laser Printers", "Laser Printers", "Desktop Computers",
     "Latitude Laptops", "Laptops", "CPVC Pipes", "PVC Pipes", "GI Pipes",
     "HDPE Pipes", "SS 304 Pipes", "Copper Cables", "Armoured Cables",
     "Acrylic Emulsion Paint", "Exterior Emulsion Paint", "MCCB Circuit Breaker",
@@ -70,14 +71,14 @@ PRODUCT_PATTERNS: List[str] = [
     # Priority 2: Explicit Tagged Fields (Item Name / Product Name)
     r'\b(?:item\s*name|product\s*name|item|product)\s*[:=\-]?\s*([A-Za-z0-9\s\-\/\.\(\)]+?)(?=[;\n\.]|\s*(?:quantity|qty|brand|uom)|$)',
 
-    # Priority 3: Supply of / Procurement of / Purchase of
-    r'\b(?:supply\s+of|procurement\s+of|purchase\s+of)\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    # Priority 3: Supply, installation and commissioning of / Supply of / Procurement of
+    r'\b(?:supply|procurement|purchase|installation|commissioning)(?:[,\s]+(?:installation|commissioning))*?\s+of\s+(?:an?\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+facility|for\s+project)|[;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
 
     # Priority 4: Quotation for / Please quote for
-    r'\b(?:quotation\s+for|quote\s+for|please\s+quote\s+for)\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    r'\b(?:quotation\s+for|quote\s+for|please\s+quote\s+for)\s+(?:the\s+)?(?:supply|procurement|purchase|installation|commissioning)?(?:[,\s]+(?:installation|commissioning))*?\s*of\s+(?:an?\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+facility|for\s+project)|[;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
 
     # Priority 5: Requirement of/for
-    r'\b(?:requirement\s+(?:of|for))\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+project)|[;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
+    r'\b(?:requirement\s+(?:of|for))\s+(?:the\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:required|needed|for\s+our|for\s+facility|for\s+project)|[;\n\.]|\s*(?:delivery|specs|quantity|qty|brand)|$)',
 
     # Priority 6: Looking for / Need / Require
     r'\b(?:looking\s+for|need|require)\s+(?:\d+\s+)?(?:nos|pcs|units|items)?\s*(?:of\s+)?([A-Za-z0-9\s\-\/\(\)]+?)(?=\s+(?:for|delivery|pincode|qty|brand|location)|[;\n\.]|$)'
@@ -89,13 +90,18 @@ SPEC_PATTERNS: List[str] = [
     r'Automatic\s+Duplex\s+(?:Printing)?[^\.\,\n]*',
     r'Network\s+Connectivity[^\.\,\n]*',
     r'\d+\s*(?:–|-|\s*to\s*)\s*\d+\s*PPM|\b\d+\s*PPM',
+    r'\d+\s+IP\s+Cameras[^\.\,\n]*',
+    r'IP\s+Cameras[^\.\,\n]*',
+    r'NVR[^\.\,\n]*',
+    r'Hard\s+Disk\s+Storage[^\.\,\n]*',
+    r'Network\s+Accessories[^\.\,\n]*',
     r'\d+\s*GB\s+(?:RAM|SSD|HDD)[^\.\,\n]*',
     r'Intel\s+i[3579]\s+(?:Processor)?[^\.\,\n]*',
     r'CPVC|PVC|PN10|PN16',
     r'Wi-Fi|Bluetooth|HDMI|Gigabit'
 ]
 
-UOM_REGEX: str = r'\b(nos|pcs|kg|boxes?|packs?|bags?|each|ea|lot|lumpsum|sets?|pair|coil|roll|bundle|sheet|tons?|mt|kl|ltr|litres?|sqft|sqm|cum|mtr|meters?|laptops?|printers?|units?|items?)\b'
+UOM_REGEX: str = r'\b(nos|pcs|kg|boxes?|packs?|bags?|each|ea|lot|lumpsum|sets?|pair|coil|roll|bundle|sheet|tons?|mt|kl|ltr|litres?|sqft|sqm|cum|mtr|meters?|laptops?|printers?|units?|items?|cameras?)\b'
 
 
 # ---------------------------------------------------------------------------
@@ -251,14 +257,17 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
 
     rfq_data["item_description"] = desc if not is_generic_description(desc) else "Procurement Request"
 
-    # 2. QUANTITY VALIDATION (Explicit + Need Verb + Word Numbers + Unit Digits)
+    # 2. QUANTITY VALIDATION (Explicit + Need Verb + Word Numbers + Unit Digits + Item Counts)
     explicit_qty = re.search(r'(?:quantity|qty|count)\s*[:=\-]?\s*(\d+)', email_text, re.IGNORECASE)
-    need_qty = re.search(r'\b(?:need|require|looking\s+for|procure|purchase|want|supply\s+of|quotation\s+for|requirement\s+(?:for|of|is\s+for))\s+(?:\d*\s+)?(\d{1,4})\b', email_text, re.IGNORECASE)
+    need_qty = re.search(r'\b(?:need|require|looking\s+for|procure|purchase|want|supply\s+of|quotation\s+for|requirement\s+(?:for|of|is\s+for|includes))\s+(?:\d*\s+)?(\d{1,4})\b', email_text, re.IGNORECASE)
+    cam_qty = re.search(r'\b(\d{1,4})\s*(?:IP\s+Cameras|Cameras|nos|pcs|units|items)\b', email_text, re.IGNORECASE)
     qty_word = re.search(r'(?:qty|quantity|count)\s*[:=\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b', email_text, re.IGNORECASE)
     word_qty = re.search(r'\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)\b(?:\s*\(\d+\)\s*)?(?:\s*' + UOM_REGEX + ')?', email_text, re.IGNORECASE)
 
     if explicit_qty:
         quantity = int(explicit_qty.group(1))
+    elif cam_qty:
+        quantity = int(cam_qty.group(1))
     elif need_qty:
         quantity = int(need_qty.group(1))
     elif qty_word:
@@ -303,12 +312,19 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
                 break
     rfq_data["brand"] = brand or "Not Specified"
 
-    # 5. FULL PHRASE SPECIFICATIONS EXTRACTION (Includes PPM Range & Model Codes)
+    # 5. FULL PHRASE SPECIFICATIONS EXTRACTION (Includes Requirement Lists & Model Codes)
     specs_list = []
+    req_inc = re.search(r'\b(?:requirement\s+includes|includes|specifications?|features?)\s*[:=\-]?\s*([^\n\.]+?)(?=\s*(?:The\s+delivery|Kindly\s+include|[;\n\.]|\d{6})|$)', email_text, re.IGNORECASE)
+    if req_inc:
+        specs_list.append(req_inc.group(1).strip())
+
     for sp in SPEC_PATTERNS:
         m = re.search(sp, email_text, re.IGNORECASE)
-        if m and m.group(0).strip() not in specs_list:
-            specs_list.append(m.group(0).strip())
+        if m:
+            val = m.group(0).strip()
+            # Avoid adding sub-phrases if already covered by full requirement clause
+            if not any(val.lower() in existing.lower() for existing in specs_list):
+                specs_list.append(val)
 
     if specs_list:
         rfq_data["specifications"] = ", ".join(specs_list)

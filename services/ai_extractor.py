@@ -109,6 +109,15 @@ UOM_REGEX: str = r'\b(nos|pcs|kg|boxes?|packs?|bags?|each|ea|lot|lumpsum|sets?|p
 # Helper & Extraction Engine Utilities
 # ---------------------------------------------------------------------------
 
+def strip_email_footers(text: str) -> str:
+    """Strips email signature footers, disclaimers, and social media links before extraction."""
+    if not text:
+        return ""
+    # Truncate text at email signature / footer boundaries
+    clean = re.sub(r'\n\s*(?:thanks\s+\&\s+regards|thanks\s+and\s+regards|best\s+regards|regards|sincerely|thanks|follow\s+us|confidentiality\s+notice|disclaimer|privacy\s+policy)[\s\S]*$', '', text, flags=re.IGNORECASE)
+    return clean.strip()
+
+
 def is_generic_description(desc_str: Optional[str]) -> bool:
     """Validates if an item description is generic noise, header artifact or document filler."""
     if not desc_str or not str(desc_str).strip():
@@ -123,7 +132,10 @@ def is_generic_description(desc_str: Optional[str]) -> bool:
         "sl no", "s.no", "description", "specification", "make", "material", "general item",
         "office", "printer", "laptop", "pipe", "cable", "paint", "industrial", "accessories",
         "catalogue", "product catalogue", "technical datasheet", "datasheet", "commercial terms",
-        "installation support", "warranty details", "cartridge yield", "warranty", "terms"
+        "installation support", "warranty details", "cartridge yield", "warranty", "terms",
+        "follow us", "follow us: linkedin", "linkedin", "twitter", "facebook", "instagram",
+        "website", "privacy policy", "terms & conditions", "disclaimer", "confidentiality notice",
+        "regards", "thanks & regards", "thanks and regards", "best regards"
     ]
     if clean in generic_exact:
         return True
@@ -132,11 +144,15 @@ def is_generic_description(desc_str: Optional[str]) -> bool:
         "procurement request", "item description", "product description",
         "description specification", "specification make", "description / specification",
         "product catalogue", "technical datasheet", "commercial terms", "installation support",
-        "warranty details", "cartridge yield"
+        "warranty details", "cartridge yield", "follow us", "privacy policy", "terms & conditions",
+        "confidentiality notice"
     ]
     for g in generic_phrases:
         if clean == g or clean.startswith(g + " ") or clean.endswith(" " + g):
             return True
+
+    if re.search(r'\b(?:follow\s+us|linkedin|facebook|twitter|instagram|unsubscribe|disclaimer|confidentiality|website|privacy\s+policy)\b', clean):
+        return True
 
     return False
 
@@ -258,7 +274,18 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
     if not isinstance(rfq_data, dict):
         rfq_data = {}
 
+    # Strip email signature footers, disclaimers & social links from body before extraction
+    clean_body = strip_email_footers(email_text)
+
     items: List[Dict[str, Any]] = rfq_data.get("items") or []
+
+    # Filter generic/footer items out of LLM items if any were returned
+    if items:
+        valid_items = []
+        for itm in items:
+            if not is_generic_description(itm.get("item_description")):
+                valid_items.append(itm)
+        items = valid_items
 
     # Convert single item dictionary from LLM/Single-pass to items list
     if not items and rfq_data.get("item_description"):
@@ -371,14 +398,15 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
     # MULTILINE LOCATION & ADDRESS BLOCK PARSING
     loc_multi = re.search(
         r'(?:delivery\s+location|delivery\s+address|delivery\s+site|material\s+should\s+be\s+delivered\s+to|material\s+is\s+required|required\s+at|delivered\s+at|ship\s+to|destination|location|site)\s*(?:is|at|to|[:=\-])?\s*([\s\S]{1,300}?)(?=\n\s*(?:within|from|kindly|specs|specifications|quantity|qty|brand|delivery\s+within|date|commercial|payment|terms|regards|\n\n[A-Z])|$)',
-        email_text, re.IGNORECASE
+        clean_body, re.IGNORECASE
     )
 
     full_address = loc_multi.group(1).strip() if loc_multi else ""
     full_address_clean = re.sub(r'\s+', ' ', full_address).strip(" ,.")
+    full_address_clean = re.sub(r'\s*(?:thanks|regards|procurement\s+team|follow\s+us|website|privacy).*$', '', full_address_clean, flags=re.IGNORECASE).strip(" ,.")
 
     pincode = ""
-    pin_m = re.search(r'\b[1-9]\d{5}\b', email_text)
+    pin_m = re.search(r'\b[1-9]\d{5}\b', clean_body)
     if pin_m:
         pincode = pin_m.group(0)
 
@@ -397,6 +425,8 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
             city = parts[0]
             if len(parts) > 1:
                 state = parts[1]
+
+    state = re.sub(r'\s*(?:thanks|regards|procurement\s+team|follow\s+us|website|privacy).*$', '', state, flags=re.IGNORECASE).strip(" ,.")
 
     # RELATIVE PO DELIVERY DATE / CALENDAR ISO DATE PARSING
     delivery_date = str(rfq_data.get("delivery_date") or "").strip()

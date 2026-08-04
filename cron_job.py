@@ -88,6 +88,41 @@ def start_cron_scheduler(cron_expression="*/5 * * * *", run_immediately=True):
         print("Cron Scheduler stopped.")
 
 
+def run_http_server():
+    """Starts a lightweight HTTP web server for Azure App Service health checks and manual URL triggers."""
+    import json
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+
+    class RFQHTTPHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path in ['/', '/api/run_rfq_job', '/health', '/api/health']:
+                try:
+                    execute_rfq_job()
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "SUCCESS", "message": "RFQ Email Processing Completed Successfully"}).encode('utf-8'))
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "ERROR", "error": str(e)}).encode('utf-8'))
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def log_message(self, format, *args):
+            pass  # Suppress standard HTTP server access logs
+
+    port = int(os.environ.get("PORT", 8000))
+    try:
+        server = HTTPServer(("0.0.0.0", port), RFQHTTPHandler)
+        print(f"HTTP Server listening on 0.0.0.0:{port} for Azure App Service...")
+        server.serve_forever()
+    except Exception as e:
+        print(f"HTTP Server error: {e}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RFQ Email Processing Cron Job Runner")
     parser.add_argument(
@@ -113,6 +148,11 @@ if __name__ == "__main__":
         print("Executing single-run mode (--once)...")
         execute_rfq_job()
     else:
+        # Start HTTP server in background thread for Azure App Service B1 Plan
+        import threading
+        web_thread = threading.Thread(target=run_http_server, daemon=True)
+        web_thread.start()
+
         start_cron_scheduler(
             cron_expression=args.cron,
             run_immediately=not args.no_immediate,

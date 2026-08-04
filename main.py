@@ -1,36 +1,14 @@
-from apscheduler.schedulers.blocking import BlockingScheduler
-from datetime import datetime
-from email_processor import process_emails
+"""
+ProcureV RFQ Email Processing Application Entrypoint for Azure App Service
+"""
 
-scheduler = BlockingScheduler()
+import threading
+from cron_job import start_cron_scheduler, run_http_server
 
-def run_job():
-    current_time = datetime.now().strftime("%d-%m-%Y %I:%M:%S %p")
-    print("=" * 60)
-    print(f"RFQ Email Processing Started")
-    print(f"Execution Time: {current_time}")
-    print("=" * 60)
+if __name__ == "__main__":
+    # Start HTTP server on PORT 8000 in background thread for Azure App Service health check & URL trigger
+    web_thread = threading.Thread(target=run_http_server, daemon=True)
+    web_thread.start()
 
-    process_emails()
-
-    print(f"Completed at: {datetime.now().strftime('%d-%m-%Y %I:%M:%S %p')}")
-    print("=" * 60)
-    print()
-
-# Run immediately when the application starts
-run_job()
-
-# Run every 5 minutes
-scheduler.add_job(
-    run_job,
-    trigger="interval",
-    minutes=5,
-    id="rfq_email_job",
-    replace_existing=True
-)
-
-print("RFQ Email Scheduler Started...")
-print("Checking emails every 5 minutes...")
-print(f"Scheduler Started At: {datetime.now().strftime('%d-%m-%Y %I:%M:%S %p')}")
-
-scheduler.start()
+    # Start 5-minute APScheduler daemon
+    start_cron_scheduler(cron_expression="*/5 * * * *", run_immediately=True)

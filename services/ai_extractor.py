@@ -228,8 +228,9 @@ def validate_and_normalize_rfq(rfq_data: Dict[str, Any], email_text: str) -> Dic
     # Strip leading "Units of ", "Pcs of ", "Nos of "
     desc = re.sub(r'^(?:units?|pcs|nos|items?|packs?|boxes?)\s+of\s+', '', desc, flags=re.IGNORECASE).strip()
 
-    # Strip quantity suffixes like "- Ten Pcs", "- 100 Mtr", "- Twenty Boxes"
+    # Strip quantity suffixes like "- Ten Pcs", "- 100 Mtr", "- Twenty Boxes", "- 500 Mtr", "- 50 Boxes"
     desc = re.sub(r'[\-\:]?\s*(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred|\d+)\s*(?:nos|pcs|units?|items?|laptops?|sets?|mtr|meters?|kg|litres?|boxes?|packs?)\b.*$', '', desc, flags=re.IGNORECASE).strip()
+    desc = desc.rstrip(" -:,.")
 
     # Recovery Tier 1: Priority Regular Expressions
     if is_generic_description(desc) or len(desc.split()) < 2 or len(desc) < 10:

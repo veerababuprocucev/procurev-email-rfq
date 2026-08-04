@@ -1,12 +1,12 @@
 import azure.functions as func
 import logging
 import datetime
-from email_processor import process_emails
+from cron_job import execute_rfq_job
 
 app = func.FunctionApp()
 
 # Azure Timer Trigger Cron Format: "second minute hour day month day-of-week"
-# "0 */5 * * * *" = Trigger every 5 minutes
+# "0 */5 * * * *" = Trigger every 5 minutes automatically in Azure
 @app.timer_trigger(
     schedule="0 */5 * * * *",
     arg_name="myTimer",
@@ -15,14 +15,9 @@ app = func.FunctionApp()
 )
 def rfq_email_processing_cron(myTimer: func.TimerRequest) -> None:
     utc_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    
     if myTimer.past_due:
-        logging.info("Azure Timer job is past due!")
+        logging.info("Azure Timer job execution is past due.")
 
-    logging.info(f"========== Azure Cron Job Started: {utc_timestamp} ==========")
-    
-    try:
-        process_emails()
-        logging.info("========== Azure Cron Job Completed Successfully ==========")
-    except Exception as e:
-        logging.error(f"Error during RFQ Email Processing in Azure: {str(e)}")
+    logging.info(f"========== Azure Function Cron Execution Started: {utc_timestamp} ==========")
+    execute_rfq_job()
+    logging.info("========== Azure Function Cron Execution Completed ==========")

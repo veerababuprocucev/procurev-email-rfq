@@ -498,8 +498,9 @@ Return ONLY VALID JSON following this exact structure:
                             rfq_data = json.loads(json_match.group())
                         except Exception:
                             pass
-    except Exception as e:
-        print(f"\n[WARNING] Ollama server unavailable ({e}). Switching to rule-based fallback extraction...")
+    except Exception:
+        # Silent fallback to high-precision rule engine when Ollama LLM is offline or not installed
+        pass
 
     if not rfq_data:
         rfq_data = fallback_extract_rfq(email_text)

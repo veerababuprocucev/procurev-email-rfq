@@ -1,3 +1,5 @@
 azure-functions
 apscheduler
 requests
+flask
+gunicorn
